@@ -1207,6 +1207,97 @@ const arcHit = await page.evaluate(() => {
 });
 check('角度寸法の円弧上をクリックで選択できる', arcHit === 'angle', 'hit=' + arcHit);
 
+// --- BK: 角度寸法の内角を数値直接編集 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'ae', type: 'angle', vx: 0, vy: 0, x1: 10, y1: 0, x2: 10, y2: 0, stroke: '#fbbf24', fill: null });
+  window.SimpleCAD.select('ae');
+});
+const angSet = await page.evaluate(() => {
+  const inp = document.querySelector('#numProps input[data-kang]');
+  if (!inp) return -1;
+  inp.value = '60'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+  const s = window.SimpleCAD.state.shapes[0];
+  const v1 = [s.x1 - s.vx, s.y1 - s.vy], v2 = [s.x2 - s.vx, s.y2 - s.vy];
+  const dot = v1[0] * v2[0] + v1[1] * v2[1];
+  return Math.acos(dot / (Math.hypot(...v1) * Math.hypot(...v2))) * 180 / Math.PI;
+});
+check('内角欄に60入力で2辺が60°になる', Math.abs(angSet - 60) < 0.5, 'ang=' + angSet.toFixed(2));
+
+// --- BL: 連続寸法ツール(3点クリックで2区間のdim) ---
+{
+  const cbox = await canvas.boundingBox();
+  await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.setTool('chain'); window.SimpleCAD.state.grid.osnap = false; });
+  for (const [rx, ry] of [[200, 150], [260, 150], [320, 150]]) { await page.mouse.move(cbox.x + rx, cbox.y + ry); await page.mouse.down(); await page.mouse.up(); }
+  await page.evaluate(() => window.SimpleCAD.setTool('select')); // ツール切替で確定
+  const chainDims = await page.evaluate(() => window.SimpleCAD.state.shapes.filter(s => s.type === 'dim').length);
+  check('連続寸法3点クリックで2区間のdimを作図', chainDims === 2, 'dims=' + chainDims);
+}
+
+// --- BM: DXF取り込み(LINE/CIRCLE, Y軸反転) ---
+const dxfStr = ['0', 'SECTION', '2', 'ENTITIES', '0', 'LINE', '8', '0', '10', '0', '20', '0', '11', '10', '21', '0', '0', 'CIRCLE', '8', '0', '10', '5', '20', '-5', '40', '3', '0', 'ENDSEC', '0', 'EOF'].join('\n');
+const dxfParsed = await page.evaluate((s) => window.SimpleCAD.parseDXF(s), dxfStr);
+check('parseDXFがLINEとCIRCLEを返す', dxfParsed.length === 2 && dxfParsed[0].type === 'line' && dxfParsed[1].type === 'circle', JSON.stringify(dxfParsed.map(s => s.type)));
+check('DXF円の中心YがY軸反転で復元(-(-5)=5)', Math.abs(dxfParsed[1].cy - 5) < 1e-6, 'cy=' + dxfParsed[1].cy);
+const dxfAdded = await page.evaluate((s) => { window.SimpleCAD.clearAll(); return window.SimpleCAD.importVector(s, 'dxf'); }, dxfStr);
+check('importVector(dxf)で2図形を追加', dxfAdded === 2 && (await page.evaluate(() => window.SimpleCAD.shapeCount())) === 2);
+
+// --- BN: SVG取り込み(line/rect/circle) ---
+const svgStr = '<svg xmlns="http://www.w3.org/2000/svg"><line x1="0" y1="0" x2="10" y2="5" stroke="#000"/><rect x="0" y="0" width="20" height="10" stroke="red"/><circle cx="5" cy="5" r="3" stroke="#0000ff"/></svg>';
+const svgParsed = await page.evaluate((s) => window.SimpleCAD.parseSVG(s), svgStr);
+check('parseSVGがline/rect/circleを返す', svgParsed.length === 3 && svgParsed.map(s => s.type).join(',') === 'line,rect,circle', JSON.stringify(svgParsed.map(s => s.type)));
+
+// --- BO: 取り込み図形もsanitizeを通す(不正色は既定値へ) ---
+const malAdded = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10" stroke="javascript:alert(1)"/></svg>';
+  window.SimpleCAD.importVector(svg, 'svg');
+  return window.SimpleCAD.state.shapes[0] ? window.SimpleCAD.state.shapes[0].stroke : null;
+});
+// parseSVGが取り込み時点で'#000'へ矯正→sanitizeShapeも通過(いずれも安全な既定色。悪意ある値は無害化)
+check('取り込み図形の不正strokeは安全な既定色へ矯正', malAdded === '#000' || malAdded === '#38bdf8', 'stroke=' + malAdded);
+
+// --- BP: 不正/曲線パスでもsvgPathPolysがハングせず返る ---
+const pathRes = await page.evaluate(() => {
+  // Z後に余分な数値、未対応の曲線(C)を含む。無限ループ・例外なく返ること
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 0 L10 10 Z 1 2 3" stroke="#000"/><path d="M0 0 C1 1 2 2 3 3 L5 5" stroke="#000"/></svg>';
+  const out = window.SimpleCAD.parseSVG(svg);
+  return { n: out.length, firstClosed: !!(out[0] && out[0].closed), allFinite: out.every(s => (s.points || []).every(p => Number.isFinite(p.x) && Number.isFinite(p.y))) };
+});
+check('不正/曲線パスでもparseSVGが完了する(ハングなし)', pathRes.n >= 1, JSON.stringify(pathRes));
+check('閉path(Z)はclosed=trueで取り込まれNaN点を含まない', pathRes.firstClosed && pathRes.allFinite, JSON.stringify(pathRes));
+
+// --- BQ: 内角編集は0〜180°にクランプ(270入力→180) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'ac', type: 'angle', vx: 0, vy: 0, x1: 10, y1: 0, x2: 10, y2: 0, stroke: '#fbbf24', fill: null });
+  window.SimpleCAD.select('ac');
+});
+const angClamp = await page.evaluate(() => {
+  const inp = document.querySelector('#numProps input[data-kang]');
+  if (!inp) return -1;
+  inp.value = '270'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+  const s = window.SimpleCAD.state.shapes[0];
+  const v1 = [s.x1 - s.vx, s.y1 - s.vy], v2 = [s.x2 - s.vx, s.y2 - s.vy];
+  return Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2))))) * 180 / Math.PI;
+});
+check('内角270入力は180°にクランプ', Math.abs(angClamp - 180) < 0.5, 'ang=' + angClamp.toFixed(2));
+
+// --- BR: parseSVGも色をsafeColorで検証(多層防御) ---
+const svgStroke = await page.evaluate(() => {
+  const out = window.SimpleCAD.parseSVG('<svg xmlns="http://www.w3.org/2000/svg"><line x1="0" y1="0" x2="1" y2="1" stroke="javascript:alert(1)"/></svg>');
+  return out[0] ? out[0].stroke : null;
+});
+check('parseSVGの不正strokeは取り込み時点で既定値', svgStroke === '#000', 'stroke=' + svgStroke);
+
+// --- BS: fontSizeの上限クランプ(巨大値の防御) ---
+const fsClamp = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'fz', type: 'text', x: 0, y: 0, fontSize: 1e9, text: 'x', stroke: '#000' });
+  return window.SimpleCAD.state.shapes[0].fontSize;
+});
+check('巨大fontSizeは上限100000にクランプ', fsClamp === 100000, 'fs=' + fsClamp);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

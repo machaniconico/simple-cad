@@ -190,6 +190,7 @@
     <div class="group">
       <button class="tbtn" id="btnSave" title="JSON保存">💾 保存</button>
       <button class="tbtn" id="btnLoad" title="JSON読込">📂 読込</button>
+      <button class="tbtn" id="btnImport" title="DXF / SVG を取り込み">📥 取込</button>
       <button class="tbtn" id="btnImg" title="画像を配置(トレース用)">🖼 画像</button>
       <span class="group" style="position:relative">
         <button class="tbtn" id="btnExport" title="書き出し">⬇ 書出 ▾</button>
@@ -203,6 +204,7 @@
       </span>
     </div>
     <input type="file" id="fileInput" accept="application/json,.json" style="display:none">
+    <input type="file" id="importInput" accept=".dxf,.svg,image/svg+xml" style="display:none">
     <input type="file" id="imgInput" accept="image/*" style="display:none">
   </div>
 
@@ -226,6 +228,7 @@
       <button class="tool" data-tool="text" title="文字">A<span class="lbl">文字</span></button>
       <button class="tool" data-tool="dim" title="寸法線">↔<span class="lbl">寸法</span></button>
       <button class="tool" data-tool="angle" title="角度寸法(頂点→2辺)">∠<span class="lbl">角度</span></button>
+      <button class="tool" data-tool="chain" title="連続寸法(点を連続クリック)">⇿<span class="lbl">連寸</span></button>
       <button class="tool" data-tool="erase" title="削除">⌫<span class="lbl">削除</span></button>
     </div>
 
@@ -341,7 +344,8 @@
         <h3>ツール（キー）</h3>
         <ul>
           <li>選択 <b>V</b> / 線 <b>L</b> / 矩形 <b>R</b> / 円 <b>C</b> / 楕円 <b>O</b> / 連線 <b>P</b> / 文字 <b>T</b> / 寸法 <b>M</b> / 角度 <b>A</b> / 削除 <b>E</b></li>
-          <li>角度寸法: 頂点→1辺目→2辺目の3クリック。文字は選択中にプロパティ欄で左/中央/右に整列</li>
+          <li>角度寸法: 頂点→1辺目→2辺目の3クリック(プロパティ欄で内角を数値編集)。連続寸法(連寸)は点を連続クリックし確定で隣接区間を一括寸法化</li>
+          <li>文字は選択中にプロパティ欄で左/中央/右に整列</li>
           <li>画面フィット <b>F</b> / ヘルプ <b>?</b></li>
           <li>正多角形は左パレットの ⬡（辺数は右パネル）</li>
         </ul>
@@ -362,7 +366,7 @@
         <h3>その他</h3>
         <ul>
           <li>レイヤー / 整列・分布 / 重ね順 / 数値直接入力 に対応</li>
-          <li>保存・読込(JSON)、画像トレース、SVG / PNG / PDF(実寸) 書き出し</li>
+          <li>保存・読込(JSON)、DXF/SVG取り込み(📥取込)、画像トレース、SVG / PNG / PDF(実寸) 書き出し</li>
           <li>ホーム画面に追加でオフライン利用可（PWA）</li>
         </ul>
       </div>
@@ -436,6 +440,7 @@ function ensureLayers() {
 // 描画途中の一時状態
 let draft = null;          // 線/矩形/円/寸法の作図中データ
 let polyPts = null;        // ポリライン作図中の点列
+let chainPts = null;       // 連続寸法作図中の点列(隣接点間を寸法線で連結)
 let arcDraft = null;       // 円弧作図中 {cx,cy,r,a0,a1,stage}
 let angleDraft = null;     // 角度寸法作図中 {vx,vy,x1,y1,x2,y2,stage}
 let dragMove = null;       // 選択移動中 {ids, startWorld, orig:Map}
@@ -650,7 +655,7 @@ function sanitizeShape(s) {
     case 'angle':
       return { ...base, type: 'angle', vx: num(s.vx), vy: num(s.vy), x1: num(s.x1), y1: num(s.y1), x2: num(s.x2), y2: num(s.y2) };
     case 'text':
-      return { ...base, type: 'text', x: num(s.x), y: num(s.y), fontSize: Math.max(1, num(s.fontSize, 16)),
+      return { ...base, type: 'text', x: num(s.x), y: num(s.y), fontSize: Math.min(100000, Math.max(1, num(s.fontSize, 16))),
         align: ['left', 'center', 'right'].includes(s.align) ? s.align : 'left', text: String(s.text == null ? '' : s.text).slice(0, 5000) };
     case 'image':
       // srcは data:image/...;base64, のみ許可(XSS/属性ブレイクアウト防止)
@@ -709,6 +714,7 @@ function draw() {
   }
   if (draft) drawDraft();
   if (polyPts) drawPolyDraft();
+  if (chainPts) drawChainDraft();
   if (arcDraft) drawArcDraft();
   if (angleDraft) drawAngleDraft();
   if (marquee) drawMarquee();
@@ -1178,6 +1184,26 @@ function buildNumPanel(s, fields) {
   const info = document.createElement('div'); info.className = 'npro'; info.id = 'npInfo';
   info.textContent = measureInfo(s);
   numProps.appendChild(info);
+  // 角度寸法: 内角(度)を直接編集 → 2辺目を頂点まわりに回して角度を設定(辺長・回転方向は保持)
+  if (s.type === 'angle') {
+    const grow = document.createElement('label');
+    const gi = document.createElement('input');
+    gi.type = 'number'; gi.step = '1'; gi.min = '0'; gi.max = '180'; gi.dataset.kang = '1';
+    gi.value = angleGeom(s).deg.toFixed(1);
+    gi.addEventListener('input', () => {
+      const cur = selectedShape(); if (!cur || cur.type !== 'angle') return;
+      const v = parseFloat(gi.value); if (isNaN(v)) return;
+      const g = angleGeom(cur);
+      const l2 = Math.hypot(cur.x2 - cur.vx, cur.y2 - cur.vy) || g.l1 || 1;
+      const sign = g.diff < 0 ? -1 : 1;
+      const a1 = g.a0 + sign * Math.max(0, Math.min(180, v)) * Math.PI / 180; // 内角は0〜180°(angleGeomの正規化に一致)
+      cur.x2 = cur.vx + l2 * Math.cos(a1); cur.y2 = cur.vy + l2 * Math.sin(a1);
+      draw();
+    });
+    gi.addEventListener('change', () => pushHistory());
+    grow.append(document.createTextNode('内角° '), gi);
+    numProps.appendChild(grow);
+  }
   // 角度(度)編集欄
   const arow = document.createElement('label');
   const ainp = document.createElement('input');
@@ -1203,6 +1229,8 @@ function syncNumValues(s) {
   });
   const adeg = numProps.querySelector('input[data-kdeg]');
   if (adeg && document.activeElement !== adeg) adeg.value = ((s.rot || 0) * 180 / Math.PI).toFixed(1);
+  const kang = numProps.querySelector('input[data-kang]');
+  if (kang && document.activeElement !== kang && s.type === 'angle') kang.value = angleGeom(s).deg.toFixed(1);
   const info = document.getElementById('npInfo');
   if (info) info.textContent = measureInfo(s);
 }
@@ -1558,6 +1586,7 @@ function onToolDown(p) {
   else if (t === 'polygon') { draft = { type: 'polygon', cx: w.x, cy: w.y, r: 0, sides: state.style.sides }; }
   else if (t === 'arc') { handleArcTap(w); }
   else if (t === 'angle') { handleAngleTap(w); }
+  else if (t === 'chain') { handleChainTap(w); }
   else if (t === 'polyline') { handlePolyTap(w); }
   else if (t === 'text') { openTextEditor(w, null); }
   draw();
@@ -1759,6 +1788,43 @@ function commitPoly(closed) {
   document.getElementById('confirmBar').classList.remove('show');
   draw();
 }
+// ---- 連続寸法(チェーン) ----
+function handleChainTap(w) {
+  if (!chainPts) { chainPts = [{ x: w.x, y: w.y }]; document.getElementById('confirmBar').classList.add('show'); return; }
+  chainPts.push({ x: w.x, y: w.y });
+}
+function commitChain() {
+  if (chainPts && chainPts.length >= 2) {
+    let added = 0;
+    for (let i = 0; i < chainPts.length - 1; i++) {
+      const a = chainPts[i], b = chainPts[i + 1];
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 0.01) continue;
+      state.shapes.push({ id: uid(), type: 'dim', x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+        stroke: '#fbbf24', strokeWidth: 1.5, fill: null, dash: 'solid', layer: state.activeLayer });
+      added++;
+    }
+    if (added) pushHistory();
+  }
+  chainPts = null; snapMarker = null;
+  document.getElementById('confirmBar').classList.remove('show');
+  draw();
+}
+function drawChainDraft() {
+  const p = chainPts;
+  if (!p || !p.length) return; // 防御(drawArcDraftと同様)
+  ctx.save();
+  ctx.strokeStyle = '#fbbf24'; ctx.fillStyle = '#fbbf24'; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(W2Sx(p[0].x), W2Sy(p[0].y));
+  for (let i = 1; i < p.length; i++) ctx.lineTo(W2Sx(p[i].x), W2Sy(p[i].y));
+  ctx.stroke();
+  for (const v of p) { ctx.beginPath(); ctx.arc(W2Sx(v.x), W2Sy(v.y), 3.5, 0, 7); ctx.fill(); }
+  ctx.restore();
+  // 各区間の長さを表示
+  for (let i = 0; i < p.length - 1; i++) {
+    const a = p[i], b = p[i + 1];
+    showMeasure((W2Sx(a.x) + W2Sx(b.x)) / 2, (W2Sy(a.y) + W2Sy(b.y)) / 2, Math.hypot(b.x - a.x, b.y - a.y).toFixed(1) + ' mm');
+  }
+}
 // ---- テキスト入力 ----
 const textInput = document.getElementById('textInput');
 let textEditTarget = null;   // 編集対象shape(新規はnull)
@@ -1771,6 +1837,7 @@ function openTextEditor(worldPos, shape) {
   textInput.style.left = Math.max(2, sx) + 'px';
   textInput.style.top = Math.max(2, sy) + 'px';
   textInput.style.display = 'block';
+  textInput.style.textAlign = shape ? (shape.align || 'left') : 'left'; // 編集欄も整列を反映
   textInput.value = shape ? (shape.text || '') : '';
   setTimeout(() => { textInput.focus(); textInput.select(); }, 0);
 }
@@ -1857,10 +1924,11 @@ function drawAngleDraft() {
   drawAngle({ vx: angleDraft.vx, vy: angleDraft.vy, x1: angleDraft.x1, y1: angleDraft.y1, x2: angleDraft.x2, y2: angleDraft.y2, stroke: '#fbbf24' });
 }
 
-document.getElementById('plDone').onclick = () => commitPoly(false);
-document.getElementById('plCancel').onclick = () => { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); draw(); };
+document.getElementById('plDone').onclick = () => { if (chainPts) commitChain(); else commitPoly(false); };
+document.getElementById('plCancel').onclick = () => { polyPts = null; chainPts = null; document.getElementById('confirmBar').classList.remove('show'); draw(); };
 // ダブルタップ/ダブルクリック: ポリライン確定 or テキスト編集
 cv.addEventListener('dblclick', e => {
+  if (chainPts) { commitChain(); return; }
   if (polyPts) { commitPoly(false); return; }
   const p = getXY(e);
   const hit = hitTest(S2Wx(p.x), S2Wy(p.y));
@@ -1873,6 +1941,7 @@ cv.addEventListener('dblclick', e => {
 document.querySelectorAll('.tool').forEach(b => {
   b.addEventListener('click', () => {
     if (polyPts) commitPoly(false);
+    if (chainPts) commitChain();
     arcDraft = null; angleDraft = null;
     document.querySelectorAll('.tool').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
@@ -2084,6 +2153,26 @@ document.getElementById('fileInput').onchange = e => {
       resetHistory();
       draw(); autosave(); updateZoomLabel(); toast('読み込みました');
     } catch (err) { toast('読み込み失敗: ' + err.message); }
+  };
+  rd.readAsText(f);
+  e.target.value = '';
+};
+
+// DXF / SVG 取り込み(現在の図面に追加)
+document.getElementById('btnImport').onclick = () => document.getElementById('importInput').click();
+document.getElementById('importInput').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const kind = /\.dxf$/i.test(f.name) ? 'dxf' : /\.svg$/i.test(f.name) || f.type === 'image/svg+xml' ? 'svg' : null;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      if (!kind) throw new Error('DXF/SVGのみ対応');
+      const n = importVector(rd.result, kind);
+      state.selection.clear();
+      if (layersPanelOpen()) renderLayers();
+      updateZoomLabel();
+      toast(n ? `${kind.toUpperCase()}から${n}個の図形を取り込みました` : '取り込める図形がありませんでした');
+    } catch (err) { toast('取り込み失敗: ' + err.message); }
   };
   rd.readAsText(f);
   e.target.value = '';
@@ -2380,7 +2469,8 @@ window.addEventListener('keydown', e => {
   // ツール切替(単独キー)
   if (!mod && !e.altKey && TOOL_KEYS[e.key.toLowerCase()]) { e.preventDefault(); activateTool(TOOL_KEYS[e.key.toLowerCase()]); }
   if (e.key === 'Enter' && polyPts) commitPoly(false);
-  if (e.key === 'Escape') { if (helpEl.style.display !== 'none') { toggleHelp(false); return; } draft = null; arcDraft = null; angleDraft = null; if (polyPts) { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
+  if (e.key === 'Enter' && chainPts) commitChain();
+  if (e.key === 'Escape') { if (helpEl.style.display !== 'none') { toggleHelp(false); return; } draft = null; arcDraft = null; angleDraft = null; if (polyPts || chainPts) { polyPts = null; chainPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
 });
 window.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; if (e.key === 'Shift') shiftHeld = false; });
 
@@ -2621,6 +2711,135 @@ function exportDXF() {
   downloadBlob(new Blob([dxf], { type: 'application/dxf' }), 'drawing.dxf');
 }
 
+// =========================================================================
+// 取り込み(DXF R12 / SVG → 図形)。DXFはY軸が上向きなので符号反転。
+// 生成図形は必ず sanitizeShape を通してから state へ追加(XSS/proto/型の防御)。
+// =========================================================================
+function dxfToShape(type, c) {
+  const g = (code, idx = 0) => { const a = c[code]; return a && a[idx] != null ? a[idx] : undefined; };
+  const nf = (code, idx = 0, d = 0) => { const v = parseFloat(g(code, idx)); return Number.isFinite(v) ? v : d; };
+  if (type === 'LINE') return { type: 'line', x1: nf(10), y1: -nf(20), x2: nf(11), y2: -nf(21), stroke: '#000' };
+  if (type === 'CIRCLE') return { type: 'circle', cx: nf(10), cy: -nf(20), r: nf(40), stroke: '#000', fill: null };
+  if (type === 'ARC') {
+    let s = nf(50), e = nf(51); if (e < s) e += 360; // DXFはCCW(0..360)。Y反転で角度は符号反転
+    return { type: 'arc', cx: nf(10), cy: -nf(20), r: nf(40), a0: -e * Math.PI / 180, a1: -s * Math.PI / 180, stroke: '#000', fill: null };
+  }
+  if (type === 'TEXT' || type === 'MTEXT') {
+    const h = nf(40, 0, 16) || 16;
+    const txt = ((c[1] || []).join('') || (c[3] || []).join('')).replace(/\\P|\\[A-Za-z][^;]*;|[{}]/g, ''); // MTEXT制御コード除去
+    const just = parseInt(g(72) || '0', 10) || 0;
+    return { type: 'text', x: nf(10), y: -nf(20) - h, fontSize: h, text: txt, align: just === 1 ? 'center' : just === 2 ? 'right' : 'left', stroke: '#000' };
+  }
+  if (type === 'LWPOLYLINE') {
+    const xs = c[10] || [], ys = c[20] || [], pts = [];
+    for (let i = 0; i < Math.min(xs.length, ys.length); i++) { const x = parseFloat(xs[i]), y = parseFloat(ys[i]); if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y: -y }); }
+    if (pts.length < 2) return null;
+    return { type: 'polyline', points: pts, closed: (parseInt(g(70) || '0', 10) & 1) === 1, stroke: '#000', fill: null };
+  }
+  return null;
+}
+function parseDXF(text) {
+  const ls = String(text).split(/\r\n|\r|\n/);
+  const pairs = [];
+  for (let i = 0; i + 1 < ls.length; i += 2) { const code = parseInt(ls[i].trim(), 10); if (!Number.isNaN(code)) pairs.push([code, ls[i + 1]]); }
+  const shapes = [];
+  let cur = null, curType = null, poly = null;
+  const finishPoly = () => { if (poly && poly.pts.length >= 2) shapes.push({ type: 'polyline', points: poly.pts, closed: poly.closed, stroke: '#000', fill: null }); poly = null; };
+  const flush = () => {
+    if (!cur) return;
+    if (curType === 'VERTEX') {
+      if (poly) { const x = parseFloat((cur[10] || [])[0]), y = parseFloat((cur[20] || [])[0]); if (Number.isFinite(x) && Number.isFinite(y)) poly.pts.push({ x, y: -y }); }
+    } else if (curType === 'POLYHEAD') {
+      if (poly) poly.closed = (parseInt((cur[70] || ['0'])[0], 10) & 1) === 1;
+    } else {
+      const sh = dxfToShape(curType, cur); if (sh) shapes.push(sh);
+    }
+    cur = null; curType = null;
+  };
+  for (const [code, raw] of pairs) {
+    const val = (raw == null ? '' : String(raw)).trim();
+    if (code === 0) {
+      flush();
+      if (val === 'POLYLINE') { finishPoly(); poly = { pts: [], closed: false }; curType = 'POLYHEAD'; cur = {}; }
+      else if (val === 'VERTEX') { curType = 'VERTEX'; cur = {}; }
+      else if (val === 'SEQEND') { finishPoly(); }
+      else if (['LINE', 'CIRCLE', 'ARC', 'LWPOLYLINE', 'TEXT', 'MTEXT'].includes(val)) { curType = val; cur = {}; }
+      continue;
+    }
+    if (cur) (cur[code] = cur[code] || []).push(val);
+  }
+  flush(); finishPoly();
+  return shapes;
+}
+function svgPathPolys(d) {
+  const out = []; let cur = null, cx = 0, cy = 0, sx = 0, sy = 0, cmd = '';
+  const tokens = String(d || '').match(/[a-zA-Z]|-?\d*\.?\d+(?:[eE]-?\d+)?/g) || [];
+  let i = 0;
+  const num = () => parseFloat(tokens[i++]);
+  const fin = v => Number.isFinite(v);
+  while (i < tokens.length) {
+    const i0 = i; // 前進監視(不正パスでの無限ループ防止)
+    if (/[a-zA-Z]/.test(tokens[i])) { cmd = tokens[i]; i++; }
+    const rel = cmd === cmd.toLowerCase(), C = cmd.toUpperCase();
+    if (C === 'M') {
+      let x = num(), y = num(); if (rel) { x += cx; y += cy; }
+      if (fin(x) && fin(y)) {
+        cx = x; cy = y;
+        if (cur && cur.pts.length >= 2) out.push(cur);
+        cur = { pts: [{ x: cx, y: cy }], closed: false }; sx = cx; sy = cy;
+      }
+      cmd = rel ? 'l' : 'L'; // 後続座標は暗黙のLineTo
+    } else if (C === 'L') { let x = num(), y = num(); if (rel) { x += cx; y += cy; } if (fin(x) && fin(y)) { cx = x; cy = y; if (cur) cur.pts.push({ x: cx, y: cy }); } }
+    else if (C === 'H') { let x = num(); if (rel) x += cx; if (fin(x)) { cx = x; if (cur) cur.pts.push({ x: cx, y: cy }); } }
+    else if (C === 'V') { let y = num(); if (rel) y += cy; if (fin(y)) { cy = y; if (cur) cur.pts.push({ x: cx, y: cy }); } }
+    else if (C === 'Z') { if (cur) { cur.closed = true; out.push(cur); cur = null; } cx = sx; cy = sy; }
+    else { while (i < tokens.length && !/[a-zA-Z]/.test(tokens[i])) i++; if (cur && cur.pts.length >= 2) out.push(cur); cur = null; } // 曲線等は非対応:サブパス終了
+    if (i === i0) i++; // どの分岐でもiが進まなければ強制的に前進(ハング防止)
+  }
+  if (cur && cur.pts.length >= 2) out.push(cur);
+  return out;
+}
+function parseSVG(text) {
+  const doc = new DOMParser().parseFromString(String(text), 'image/svg+xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('SVG解析に失敗');
+  const root = doc.documentElement;
+  if (!root || root.tagName.toLowerCase() !== 'svg') throw new Error('SVGではありません');
+  const shapes = [];
+  const nf = (el, a, d = 0) => { const v = parseFloat(el.getAttribute(a)); return Number.isFinite(v) ? v : d; };
+  // 多層防御: 取り込み時点でも色を検証(後段のsanitizeShapeに加え、直接parseSVGを使う経路も保護)
+  const strokeOf = el => safeColor(el.getAttribute('stroke'), '#000');
+  const fillOf = el => { const f = el.getAttribute('fill'); return (f && f !== 'none') ? safeColor(f, null) : null; };
+  const rotOf = el => { let n = el; while (n && n.getAttribute) { const t = n.getAttribute('transform'); if (t) { const m = /rotate\(\s*(-?[\d.]+)/.exec(t); if (m) return parseFloat(m[1]) * Math.PI / 180; } n = n.parentNode; } return 0; };
+  const parsePoints = str => { const nums = (str || '').trim().split(/[\s,]+/).map(Number); const pts = []; for (let i = 0; i + 1 < nums.length; i += 2) if (Number.isFinite(nums[i]) && Number.isFinite(nums[i + 1])) pts.push({ x: nums[i], y: nums[i + 1] }); return pts; };
+  for (const el of root.querySelectorAll('line,rect,circle,ellipse,polyline,polygon,text,path')) {
+    const tag = el.tagName.toLowerCase(), rot = rotOf(el);
+    const base = { stroke: strokeOf(el) }; if (rot) base.rot = rot;
+    if (tag === 'line') shapes.push({ ...base, type: 'line', x1: nf(el, 'x1'), y1: nf(el, 'y1'), x2: nf(el, 'x2'), y2: nf(el, 'y2') });
+    else if (tag === 'rect') shapes.push({ ...base, type: 'rect', x: nf(el, 'x'), y: nf(el, 'y'), w: nf(el, 'width'), h: nf(el, 'height'), fill: fillOf(el) });
+    else if (tag === 'circle') shapes.push({ ...base, type: 'circle', cx: nf(el, 'cx'), cy: nf(el, 'cy'), r: nf(el, 'r'), fill: fillOf(el) });
+    else if (tag === 'ellipse') shapes.push({ ...base, type: 'ellipse', cx: nf(el, 'cx'), cy: nf(el, 'cy'), rx: nf(el, 'rx'), ry: nf(el, 'ry'), fill: fillOf(el) });
+    else if (tag === 'polyline' || tag === 'polygon') { const pts = parsePoints(el.getAttribute('points')); if (pts.length >= 2) shapes.push({ ...base, type: 'polyline', points: pts, closed: tag === 'polygon', fill: tag === 'polygon' ? fillOf(el) : null }); }
+    else if (tag === 'text') {
+      const fs = parseFloat(el.getAttribute('font-size')) || 16;
+      const spans = el.getElementsByTagName('tspan');
+      const txt = spans.length ? Array.from(spans).map(s => s.textContent).join('\n') : (el.textContent || '');
+      const anchor = el.getAttribute('text-anchor');
+      shapes.push({ ...base, type: 'text', x: nf(el, 'x'), y: nf(el, 'y'), fontSize: fs, text: txt, align: anchor === 'middle' ? 'center' : anchor === 'end' ? 'right' : 'left', stroke: safeColor(el.getAttribute('fill'), '#000') });
+    }
+    else if (tag === 'path') { for (const seg of svgPathPolys(el.getAttribute('d'))) if (seg.pts.length >= 2) shapes.push({ ...base, type: 'polyline', points: seg.pts, closed: seg.closed, fill: seg.closed ? fillOf(el) : null }); }
+  }
+  return shapes;
+}
+// テキストfrom DXF/SVG → サニタイズ→追加→ビューフィット。追加数を返す。
+function importVector(text, kind) {
+  const raw = kind === 'dxf' ? parseDXF(text) : kind === 'svg' ? parseSVG(text) : null;
+  if (!raw) throw new Error('未対応の形式');
+  let added = 0;
+  for (const r of raw) { r.layer = state.activeLayer; const ns = sanitizeShape(r); if (ns) { state.shapes.push(ns); added++; } }
+  if (added) { bumpNextId(); pushHistory(); fitView(); draw(); autosave(); }
+  return added;
+}
+
 // ---- PDF書き出し（実寸・依存なし。SVGを高解像度ラスタライズしFlateで埋め込み）----
 function drawingExtentMM() {
   const e = computeExtent(exportShapes());
@@ -2787,6 +3006,9 @@ window.SimpleCAD = {
   state, draw, fitView, undo, redo,
   buildSVGString,
   buildDXF,
+  parseDXF,
+  parseSVG,
+  importVector,
   buildPDFBlob,
   exportPNG,
   hitTest, resolvePoint,
