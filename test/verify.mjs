@@ -1409,6 +1409,20 @@ const svgSW = await page.evaluate(() => {
 });
 check('SVG stroke-widthを取り込む', Math.abs(svgSW - 3) < 1e-6, 'sw=' + svgSW);
 
+// --- CE: DXFレイヤー(code 8)を SimpleCAD レイヤーへマッピング ---
+const dxfLayers = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  const dxf = ['0', 'SECTION', '2', 'ENTITIES',
+    '0', 'LINE', '8', 'WALL', '10', '0', '20', '0', '11', '10', '21', '0',
+    '0', 'LINE', '8', 'DOOR', '10', '0', '20', '0', '11', '5', '21', '5',
+    '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  window.SimpleCAD.importVector(dxf, 'dxf');
+  const layerNames = window.SimpleCAD.state.layers.map(l => l.name);
+  const shapeLayers = window.SimpleCAD.state.shapes.map(s => { const l = window.SimpleCAD.state.layers.find(x => x.id === s.layer); return l ? l.name : null; });
+  return { layerNames, shapeLayers };
+});
+check('DXFレイヤー名で層を作成し図形を割当', dxfLayers.layerNames.includes('WALL') && dxfLayers.layerNames.includes('DOOR') && dxfLayers.shapeLayers.includes('WALL') && dxfLayers.shapeLayers.includes('DOOR'), JSON.stringify(dxfLayers));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

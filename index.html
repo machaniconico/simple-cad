@@ -2792,15 +2792,15 @@ function parseDXF(text) {
   for (let i = 0; i + 1 < ls.length; i += 2) { const code = parseInt(ls[i].trim(), 10); if (!Number.isNaN(code)) pairs.push([code, ls[i + 1]]); }
   const shapes = [];
   let cur = null, curType = null, poly = null;
-  const finishPoly = () => { if (poly && poly.pts.length >= 2) shapes.push({ type: 'polyline', points: poly.pts, closed: poly.closed, stroke: poly.stroke || '#000', fill: null }); poly = null; };
+  const finishPoly = () => { if (poly && poly.pts.length >= 2) shapes.push({ type: 'polyline', points: poly.pts, closed: poly.closed, stroke: poly.stroke || '#000', fill: null, _layerName: poly._layerName }); poly = null; };
   const flush = () => {
     if (!cur) return;
     if (curType === 'VERTEX') {
       if (poly) { const x = parseFloat((cur[10] || [])[0]), y = parseFloat((cur[20] || [])[0]); if (Number.isFinite(x) && Number.isFinite(y)) poly.pts.push({ x, y: -y }); }
     } else if (curType === 'POLYHEAD') {
-      if (poly) { poly.closed = (parseInt((cur[70] || ['0'])[0], 10) & 1) === 1; poly.stroke = dxfColor(cur); }
+      if (poly) { poly.closed = (parseInt((cur[70] || ['0'])[0], 10) & 1) === 1; poly.stroke = dxfColor(cur); poly._layerName = (cur[8] || [])[0]; }
     } else {
-      const sh = dxfToShape(curType, cur); if (sh) shapes.push(sh);
+      const sh = dxfToShape(curType, cur); if (sh) { sh._layerName = (cur[8] || [])[0]; shapes.push(sh); }
     }
     cur = null; curType = null;
   };
@@ -2924,9 +2924,20 @@ function parseSVG(text) {
 function importVector(text, kind) {
   const raw = kind === 'dxf' ? parseDXF(text) : kind === 'svg' ? parseSVG(text) : null;
   if (!raw) throw new Error('未対応の形式');
+  // DXFのレイヤー名(code 8)を SimpleCAD レイヤーへマップ(無ければ作成。'0'=既定はアクティブ層)
+  const nameToId = {}; for (const l of state.layers) nameToId[l.name] = l.id;
   let added = 0;
-  for (const r of raw) { r.layer = state.activeLayer; const ns = sanitizeShape(r); if (ns) { state.shapes.push(ns); added++; } }
-  if (added) { bumpNextId(); pushHistory(); fitView(); draw(); autosave(); }
+  for (const r of raw) {
+    let layerId = state.activeLayer;
+    const nm = r._layerName != null ? String(r._layerName).slice(0, 100) : '';
+    if (kind === 'dxf' && nm && nm !== '0') {
+      if (!nameToId[nm]) { const id = 'L' + (nextLayerId++); state.layers.push({ id, name: nm, visible: true, locked: false }); nameToId[nm] = id; }
+      layerId = nameToId[nm];
+    }
+    r.layer = layerId; delete r._layerName;
+    const ns = sanitizeShape(r); if (ns) { state.shapes.push(ns); added++; }
+  }
+  if (added) { bumpNextId(); pushHistory(); fitView(); draw(); autosave(); if (typeof layersPanelOpen === 'function' && layersPanelOpen()) renderLayers(); }
   return added;
 }
 
