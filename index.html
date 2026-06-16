@@ -341,6 +341,7 @@ let dragMove = null;       // 選択移動中 {ids, startWorld, orig:Map}
 let handleDrag = null;     // 変形(リサイズ/回転)中
 let marquee = null;        // 範囲選択ドラッグ {x0,y0,x1,y1(world), add}
 let pointerShift = false;  // 直近pointerdownのShift状態
+let pointerAlt = false;    // 直近pointerdownのAlt状態(Alt+ドラッグ複製)
 let snapMarker = null;     // スナップ表示位置(world)
 
 // 履歴（lastSnapshot = 現在コミット済み状態。pushHistoryは「変更前」状態をundoへ積む）
@@ -1056,6 +1057,7 @@ cv.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, p);
   downScreen = p;
   pointerShift = e.shiftKey;
+  pointerAlt = e.altKey;
   if (e.pointerType) coarsePointer = (e.pointerType === 'touch' || e.pointerType === 'pen');
 
   if (pointers.size === 2) {
@@ -1158,12 +1160,23 @@ function onToolDown(p) {
         draw(); return;
       }
       if (!state.selection.has(hit.id)) { state.selection.clear(); state.selection.add(hit.id); }
+      let duplicated = false;
+      if (pointerAlt) {
+        // Alt+ドラッグ: 選択を複製し、コピー側をドラッグ(原本は残す)
+        const newIds = [];
+        for (const id of [...state.selection]) {
+          const o = state.shapes.find(x => x.id === id); if (!o) continue;
+          const ns = JSON.parse(JSON.stringify(o)); ns.id = uid();
+          state.shapes.push(ns); newIds.push(ns.id);
+        }
+        if (newIds.length) { state.selection.clear(); newIds.forEach(i => state.selection.add(i)); duplicated = true; }
+      }
       const orig = new Map();
       for (const id of state.selection) {
         const s = state.shapes.find(x => x.id === id);
         if (s) orig.set(id, JSON.parse(JSON.stringify(s)));
       }
-      dragMove = { startWorld: { x: S2Wx(p.x), y: S2Wy(p.y) }, orig, moved: false };
+      dragMove = { startWorld: { x: S2Wx(p.x), y: S2Wy(p.y) }, orig, moved: false, duplicated };
     } else {
       // 空き場所ドラッグで範囲選択(Shiftなら追加)
       if (!pointerShift) state.selection.clear();
@@ -1335,7 +1348,7 @@ function onToolUp(p) {
     marquee = null; draw(); return;
   }
   if (dragMove) {
-    if (dragMove.moved) pushHistory();
+    if (dragMove.moved || dragMove.duplicated) pushHistory();
     dragMove = null; return;
   }
   if (!draft) return;

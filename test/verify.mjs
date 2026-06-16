@@ -654,6 +654,28 @@ await page.mouse.click(0 + 105 * 2, 51 + 150 * 2);
 const mouseSel = await page.evaluate(() => window.SimpleCAD.state.selection.size);
 check('マウスは細判定で5mm外しは非選択', mouseSel === 0, 'sel=' + mouseSel);
 
+// --- AB: Alt+ドラッグ複製 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 };
+  window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.setTool('select');
+  window.SimpleCAD.addShape({ id: 'ad', type: 'rect', x: 60, y: 60, w: 40, h: 30, stroke: '#fff', strokeWidth: 2, fill: null });
+});
+const grab = toVp(60, 75); // 左辺をつかむ
+await page.keyboard.down('Alt');
+await page.mouse.move(grab.x, grab.y); await page.mouse.down();
+await page.mouse.move(grab.x + 60, grab.y + 40, { steps: 3 }); await page.mouse.move(grab.x + 120, grab.y + 80, { steps: 3 }); await page.mouse.up();
+await page.keyboard.up('Alt');
+const altRes = await page.evaluate(() => ({ count: window.SimpleCAD.shapeCount(), origX: window.SimpleCAD.state.shapes[0].x, sel: window.SimpleCAD.state.selection.size }));
+check('Alt+ドラッグで複製され2個になる', altRes.count === 2, JSON.stringify(altRes));
+check('原本は元位置に残る(x=60)', altRes.origX === 60, 'origX=' + altRes.origX);
+check('複製側が選択される', altRes.sel === 1, 'sel=' + altRes.sel);
+// Undoで複製ごと戻る
+await page.evaluate(() => window.SimpleCAD.undo());
+const undoCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('Alt複製はUndoで1個に戻る', undoCnt === 1, 'count=' + undoCnt);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
