@@ -1070,6 +1070,18 @@ check('塗りスウォッチで選択図形に塗りが入る', await page.evalu
 await page.evaluate(() => { window.SimpleCAD.select('fl'); document.querySelectorAll('#fillSwatches button')[0].click(); }); // なし
 check('「なし」で塗りがnullになる', await page.evaluate(() => window.SimpleCAD.state.shapes[0].fill) === null);
 
+// --- BA: loadJSON後のnextId衝突防止 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  // id s5 を含むデータを読み込む
+  window.SimpleCAD.loadJSON({ shapes: [{ id: 's5', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#000', strokeWidth: 1, fill: null }] });
+});
+// 次に作図する図形のidが s5 と衝突しない
+await page.evaluate(() => { window.SimpleCAD.setTool('rect'); });
+await drawDrag(page, { x: 0, y: 51 }, 200, 200, 260, 260);
+const ids = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.id));
+check('loadJSON後の新規idが既存と衝突しない', new Set(ids).size === ids.length && ids.includes('s5'), JSON.stringify(ids));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

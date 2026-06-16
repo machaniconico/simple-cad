@@ -339,6 +339,7 @@
         <h3>ツール（キー）</h3>
         <ul>
           <li>選択 <b>V</b> / 線 <b>L</b> / 矩形 <b>R</b> / 円 <b>C</b> / 楕円 <b>O</b> / 連線 <b>P</b> / 文字 <b>T</b> / 寸法 <b>M</b> / 削除 <b>E</b></li>
+          <li>画面フィット <b>F</b> / ヘルプ <b>?</b></li>
           <li>正多角形は左パレットの ⬡（辺数は右パネル）</li>
         </ul>
         <h3>操作</h3>
@@ -459,8 +460,9 @@ function pushHistory() {
   autosave();
 }
 function restore(str) {
+  // 不変条件: 履歴スタックは snapshot() が生成した自前データのみを保持する(外部データは入らない)
   const o = JSON.parse(str);
-  state.shapes = o.shapes; nextId = o.nextId;
+  state.shapes = o.shapes; if (isNum(o.nextId)) nextId = +o.nextId;
   if (isNum(o.nextLayerId)) nextLayerId = o.nextLayerId;
   if (isNum(o.nextGroupId)) nextGroupId = o.nextGroupId;
   if (o.layers) state.layers = o.layers;
@@ -614,6 +616,12 @@ function sanitizeShape(s) {
     default:
       return null;
   }
+}
+// 既存図形のidからnextIdを最大+1に更新(uid衝突防止)
+function bumpNextId() {
+  let mx = 0;
+  for (const s of state.shapes) { const n = parseInt(String(s.id || '').replace('s', '')); if (Number.isFinite(n) && n > mx) mx = n; }
+  if (nextId <= mx) nextId = mx + 1;
 }
 function sanitizeShapes(arr) {
   if (!Array.isArray(arr)) return [];
@@ -1556,7 +1564,7 @@ function onToolUp(p) {
       for (const s of state.shapes) {
         if (!isVisible(s) || isLocked(s)) continue;
         const b = shapeExtent(s); if (!b) continue;
-        if (b.x < rx1 && b.x + b.w > rx0 && b.y < ry1 && b.y + b.h > ry0) state.selection.add(s.id);
+        if (b.x <= rx1 && b.x + b.w >= rx0 && b.y <= ry1 && b.y + b.h >= ry0) state.selection.add(s.id);
       }
       expandSelectionToGroups();
     }
@@ -2187,6 +2195,7 @@ window.addEventListener('keydown', e => {
     e.preventDefault(); deleteSelection();
   }
   if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
+  if (!mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); fitView(); return; }
   // ツール切替(単独キー)
   if (!mod && !e.altKey && TOOL_KEYS[e.key.toLowerCase()]) { e.preventDefault(); activateTool(TOOL_KEYS[e.key.toLowerCase()]); }
   if (e.key === 'Enter' && polyPts) commitPoly(false);
@@ -2572,7 +2581,7 @@ window.SimpleCAD = {
   shapeCount: () => state.shapes.length,
   clearAll: () => { state.shapes = []; state.selection.clear(); nextId = 1; resetHistory(); draw(); },
   commitPoly,
-  addShape: (sh) => { if (!sh.layer) sh.layer = state.activeLayer; state.shapes.push(sh); pushHistory(); draw(); },
+  addShape: (sh) => { const ns = sanitizeShape(sh); if (!ns) return; ns.id = (sh && sh.id) ? String(sh.id) : ns.id; if (!getLayer(ns.layer)) ns.layer = state.activeLayer; state.shapes.push(ns); bumpNextId(); pushHistory(); draw(); },
   select: (id) => { state.selection.clear(); if (id) state.selection.add(id); draw(); },
   selectMany: (ids) => { state.selection.clear(); (ids || []).forEach(i => state.selection.add(i)); draw(); },
   saveNow,
@@ -2584,7 +2593,7 @@ window.SimpleCAD = {
   lockAPI: { toggle: toggleLockSelection },
   layerAPI: { add: addLayer, del: deleteLayer, moveSel: moveSelectionToActive, render: renderLayers, toggle: toggleLayers, ensure: ensureLayers },
   transformAPI: { handleGeom, scaleShapeAbout, shapeExtent, shapeCenter },
-  loadJSON: (o) => { state.shapes = sanitizeShapes(o.shapes); const v = safeView(o.view); if (v) state.view = v; const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls; if (o.activeLayer) state.activeLayer = String(o.activeLayer); ensureLayers(); resetHistory(); draw(); },
+  loadJSON: (o) => { state.shapes = sanitizeShapes(o.shapes); bumpNextId(); const v = safeView(o.view); if (v) state.view = v; const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls; if (o.activeLayer) state.activeLayer = String(o.activeLayer); ensureLayers(); resetHistory(); draw(); },
   dumpJSON: () => JSON.parse(JSON.stringify({ shapes: state.shapes, view: state.view, layers: state.layers, activeLayer: state.activeLayer })),
 };
 
