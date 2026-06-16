@@ -927,7 +927,7 @@ function textSize(s) {
 // ヒットテスト（選択用）
 // =========================================================================
 function hitTest(wx, wy) {
-  const thr = 8 / state.view.scale; // クリック許容(world)
+  const thr = (coarsePointer ? 14 : 8) / state.view.scale; // クリック許容(world。指操作は広め)
   for (let i = state.shapes.length - 1; i >= 0; i--) {
     const s = state.shapes[i];
     if (!isVisible(s) || isLocked(s)) continue; // 非表示/ロック層は選択不可
@@ -1042,6 +1042,7 @@ let pinch = null;             // {dist, cx, cy} 2本指ジェスチャ
 let panning = false;          // 中ボタン/スペースパン
 let spaceDown = false;
 let shiftHeld = false;     // 直交拘束用のShift状態
+let coarsePointer = (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches); // 指操作か
 let downScreen = null;
 
 function getXY(e) {
@@ -1055,6 +1056,7 @@ cv.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, p);
   downScreen = p;
   pointerShift = e.shiftKey;
+  if (e.pointerType) coarsePointer = (e.pointerType === 'touch' || e.pointerType === 'pen');
 
   if (pointers.size === 2) {
     // ピンチ開始：作図途中ならドラフト破棄
@@ -1190,9 +1192,10 @@ function onToolDown(p) {
 // ハンドルを掴んだか判定し、掴んだらドラッグ開始
 function startHandleDrag(s, p) {
   const hg = handleGeom(s);
+  const grab = coarsePointer ? 22 : 14; // 指操作はハンドル把持を広く
   const sd = (wp) => Math.hypot(p.x - W2Sx(wp.x), p.y - W2Sy(wp.y));
   // 回転ハンドル
-  if (sd(hg.rotHandle) < 14) {
+  if (sd(hg.rotHandle) < grab) {
     const wx = S2Wx(p.x), wy = S2Wy(p.y);
     handleDrag = { mode: 'rotate', id: s.id, orig: JSON.parse(JSON.stringify(s)),
       center: hg.center, startAng: Math.atan2(wy - hg.center.y, wx - hg.center.x), startRot: s.rot || 0, changed: false };
@@ -1200,7 +1203,7 @@ function startHandleDrag(s, p) {
   }
   // 角ハンドル(リサイズ)
   for (let i = 0; i < 4; i++) {
-    if (sd(hg.corners[i]) < 14) {
+    if (sd(hg.corners[i]) < grab) {
       const anchorLocal = hg.localCorners[(i + 2) % 4]; // 対角
       handleDrag = { mode: 'resize', id: s.id, orig: JSON.parse(JSON.stringify(s)),
         center: hg.center, cornerIdx: i, anchorLocal: { ...anchorLocal },

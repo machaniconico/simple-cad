@@ -629,6 +629,31 @@ await drawDrag(page, { x: 0, y: 51 }, 120 * 2, 120 * 2, 160 * 2, 120 * 2);
 const tri = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'polyline' && s.closed));
 check('辺数3で三角形になる', tri && tri.points.length === 3, JSON.stringify(tri && tri.points.length));
 
+// --- AA: タッチ時のヒット判定拡大 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 };
+  window.SimpleCAD.setTool('select');
+  // 縦線 x=100, y=100..200
+  window.SimpleCAD.addShape({ id: 'tl', type: 'line', x1: 100, y1: 100, x2: 100, y2: 200, stroke: '#fff', strokeWidth: 1, fill: null });
+});
+// 線から world約5mm(=10px)離れた点を「タッチ」でタップ → 拡大判定(14px)で選択されるはず
+await page.evaluate(() => {
+  const cv = document.getElementById('cv');
+  const r = cv.getBoundingClientRect();
+  const wx = 105, wy = 150; // 線(x=100)から5mm右
+  const sx = r.left + wx * 2, sy = r.top + wy * 2;
+  const mk = (type) => cv.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: 'touch', clientX: sx, clientY: sy, bubbles: true, cancelable: true, isPrimary: true }));
+  mk('pointerdown'); mk('pointerup');
+});
+const touchSel = await page.evaluate(() => window.SimpleCAD.state.selection.size);
+check('タッチは判定が広く、5mm外しても線を選択', touchSel === 1, 'sel=' + touchSel);
+// マウス(細判定)で同じ点(5mm外し=10px>8px)はヒットしない
+await page.evaluate(() => { window.SimpleCAD.state.selection.clear(); window.SimpleCAD.draw(); });
+await page.mouse.click(0 + 105 * 2, 51 + 150 * 2);
+const mouseSel = await page.evaluate(() => window.SimpleCAD.state.selection.size);
+check('マウスは細判定で5mm外しは非選択', mouseSel === 0, 'sel=' + mouseSel);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
