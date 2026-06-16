@@ -1701,9 +1701,14 @@ document.querySelectorAll('.tool').forEach(b => {
     b.classList.add('active');
     state.tool = b.dataset.tool;
     state.selection.clear();
+    updateCursor();
     draw();
   });
 });
+// ツールに応じてカーソル形状を変更
+function updateCursor() {
+  cv.style.cursor = state.tool === 'select' ? 'default' : state.tool === 'erase' ? 'pointer' : 'crosshair';
+}
 
 // プロパティ
 // カラースウォッチ(ワンタップで線色設定。選択中は即適用)
@@ -2529,6 +2534,7 @@ function init() {
   updateZoomLabel();
   resetHistory();
   syncPrefsUI();
+  updateCursor();
   draw();
 }
 // デバッグ/テスト用API（自動テストから内部状態へアクセスするため公開。実害なし）

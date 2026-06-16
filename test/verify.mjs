@@ -1051,6 +1051,12 @@ await page.evaluate(() => { window.SimpleCAD.state.shapes[0].rot = Math.PI / 6; 
 const svgRot = await page.evaluate(() => window.SimpleCAD.buildSVGString());
 check('回転arcはSVGで<g transform>を使わない(二重回転防止)', !svgRot.includes('<g transform'), svgRot.slice(0, 60));
 
+// --- AY: ツール別カーソル ---
+await page.evaluate(() => window.SimpleCAD.setTool('line'));
+check('作図ツールでcrosshairカーソル', await page.evaluate(() => document.getElementById('cv').style.cursor) === 'crosshair');
+await page.evaluate(() => window.SimpleCAD.setTool('select'));
+check('選択ツールでdefaultカーソル', await page.evaluate(() => document.getElementById('cv').style.cursor) === 'default');
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
