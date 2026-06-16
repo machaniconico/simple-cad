@@ -250,6 +250,12 @@
         <label class="chk"><input type="checkbox" id="cSnap" checked> グリッド吸着</label>
         <label class="chk"><input type="checkbox" id="cOsnap" checked> 端点スナップ</label>
         <label class="chk"><input type="checkbox" id="cLight"> 用紙(白)モード</label>
+        <label>小数桁 <select id="gPrec">
+          <option value="0">0</option>
+          <option value="1" selected>1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select></label>
         <label>間隔 <select id="gStep">
           <option value="1">1 mm</option>
           <option value="5">5 mm</option>
@@ -405,7 +411,7 @@ const state = {
   grid: { show: true, snap: true, osnap: true, step: 10 },
   layers: [{ id: 'L1', name: 'レイヤー1', visible: true, locked: false }],
   activeLayer: 'L1',
-  ui: { light: false },
+  ui: { light: false, precision: 1 },
 };
 let nextId = 1;
 let nextLayerId = 2;
@@ -895,6 +901,8 @@ function drawShape(s, selected) {
   if (selected) drawSelectionDecor(s);
 }
 
+// 計測ラベルの桁数(state.ui.precision、0〜3)。長さ・寸法・角度などの表示に適用
+function fmtLen(v) { const p = (state.ui && Number.isInteger(state.ui.precision)) ? Math.max(0, Math.min(3, state.ui.precision)) : 1; return (+v).toFixed(p); }
 // 寸法線（矢羽根＋距離ラベル）
 function drawDimension(s) {
   const ax = W2Sx(s.x1), ay = W2Sy(s.y1), bx = W2Sx(s.x2), by = W2Sy(s.y2);
@@ -914,7 +922,7 @@ function drawDimension(s) {
   }
   const dist = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
   const mx = (ax + bx) / 2, my = (ay + by) / 2;
-  const label = dist.toFixed(1) + ' mm';
+  const label = fmtLen(dist) + ' mm';
   ctx.font = '12px system-ui';
   ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
   const tw = ctx.measureText(label).width;
@@ -965,7 +973,7 @@ function drawAngle(s) {
   const R = g.r * state.view.scale;
   ctx.beginPath(); ctx.arc(vx, vy, R, g.a0, g.a1, g.acw); ctx.stroke();
   const lx = vx + Math.cos(g.bis) * (R + 14), ly = vy + Math.sin(g.bis) * (R + 14);
-  const label = g.deg.toFixed(1) + '°';
+  const label = fmtLen(g.deg) + '°';
   ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const tw = ctx.measureText(label).width;
   ctx.fillStyle = 'rgba(15,23,42,0.85)';
@@ -1029,27 +1037,27 @@ function drawDraft() {
     ctx.moveTo(W2Sx(s.x1), W2Sy(s.y1)); ctx.lineTo(W2Sx(s.x2), W2Sy(s.y2)); ctx.stroke();
     // 角度は数学系(上が負)を画面系(上が正)へ反転して表示
     const deg = (-Math.atan2(s.y2 - s.y1, s.x2 - s.x1) * 180 / Math.PI + 360) % 360;
-    label = Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(1) + ' mm ∠' + deg.toFixed(0) + '°';
+    label = fmtLen(Math.hypot(s.x2 - s.x1, s.y2 - s.y1)) + ' mm ∠' + deg.toFixed(0) + '°';
     showMeasure((W2Sx(s.x1) + W2Sx(s.x2)) / 2, (W2Sy(s.y1) + W2Sy(s.y2)) / 2, label);
   } else if (s.type === 'rect') {
     const x = W2Sx(s.x), y = W2Sy(s.y);
     ctx.strokeRect(x, y, s.w * state.view.scale, s.h * state.view.scale);
-    label = Math.abs(s.w).toFixed(1) + ' × ' + Math.abs(s.h).toFixed(1) + ' mm';
+    label = fmtLen(Math.abs(s.w)) + ' × ' + fmtLen(Math.abs(s.h)) + ' mm';
     showMeasure(x + s.w * state.view.scale / 2, y + s.h * state.view.scale / 2, label);
   } else if (s.type === 'circle') {
     ctx.arc(W2Sx(s.cx), W2Sy(s.cy), s.r * state.view.scale, 0, Math.PI * 2); ctx.stroke();
-    label = 'r ' + s.r.toFixed(1) + ' mm';
+    label = 'r ' + fmtLen(s.r) + ' mm';
     showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
   } else if (s.type === 'ellipse') {
     ctx.ellipse(W2Sx(s.cx), W2Sy(s.cy), s.rx * state.view.scale, s.ry * state.view.scale, 0, 0, Math.PI * 2); ctx.stroke();
-    label = (s.rx * 2).toFixed(1) + ' × ' + (s.ry * 2).toFixed(1) + ' mm';
+    label = fmtLen(s.rx * 2) + ' × ' + fmtLen(s.ry * 2) + ' mm';
     showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
   } else if (s.type === 'polygon') {
     const pts = polygonPoints(s.cx, s.cy, s.r, s.sides, s.aim);
     ctx.moveTo(W2Sx(pts[0].x), W2Sy(pts[0].y));
     for (let i = 1; i < pts.length; i++) ctx.lineTo(W2Sx(pts[i].x), W2Sy(pts[i].y));
     ctx.closePath(); ctx.stroke();
-    label = s.sides + '角形 r' + s.r.toFixed(1);
+    label = s.sides + '角形 r' + fmtLen(s.r);
     showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
   }
   ctx.setLineDash([]);
@@ -1131,9 +1139,9 @@ function addRadiusDim(s) {
 }
 // 選択図形の計測情報(面積/長さ/周長)。無ければ空文字
 function measureInfo(s) {
-  const f1 = v => v.toFixed(1);
+  const f1 = v => fmtLen(v);
   if (s.type === 'line' || s.type === 'dim') return '長さ ' + f1(Math.hypot(s.x2 - s.x1, s.y2 - s.y1)) + ' mm';
-  if (s.type === 'angle') return '角度 ' + angleGeom(s).deg.toFixed(1) + '°';
+  if (s.type === 'angle') return '角度 ' + fmtLen(angleGeom(s).deg) + '°';
   if (s.type === 'rect') return '面積 ' + f1(Math.abs(s.w * s.h)) + ' mm² / 周 ' + f1(2 * (Math.abs(s.w) + Math.abs(s.h))) + ' mm';
   if (s.type === 'circle') return '面積 ' + f1(Math.PI * s.r * s.r) + ' mm² / 円周 ' + f1(2 * Math.PI * s.r) + ' mm';
   if (s.type === 'ellipse') return '面積 ' + f1(Math.PI * s.rx * s.ry) + ' mm²';
@@ -1850,7 +1858,7 @@ function drawChainDraft() {
   // 各区間の長さを表示
   for (let i = 0; i < p.length - 1; i++) {
     const a = p[i], b = p[i + 1];
-    showMeasure((W2Sx(a.x) + W2Sx(b.x)) / 2, (W2Sy(a.y) + W2Sy(b.y)) / 2, Math.hypot(b.x - a.x, b.y - a.y).toFixed(1) + ' mm');
+    showMeasure((W2Sx(a.x) + W2Sx(b.x)) / 2, (W2Sy(a.y) + W2Sy(b.y)) / 2, fmtLen(Math.hypot(b.x - a.x, b.y - a.y)) + ' mm');
   }
 }
 // ---- テキスト入力 ----
@@ -1922,7 +1930,7 @@ function drawArcDraft() {
   else ctx.arc(W2Sx(arcDraft.cx), W2Sy(arcDraft.cy), arcDraft.r * state.view.scale, arcDraft.a0, arcDraft.a1);
   ctx.stroke();
   ctx.setLineDash([]);
-  showMeasure(W2Sx(arcDraft.cx), W2Sy(arcDraft.cy), 'r ' + arcDraft.r.toFixed(1));
+  showMeasure(W2Sx(arcDraft.cx), W2Sy(arcDraft.cy), 'r ' + fmtLen(arcDraft.r));
 }
 
 // ---- 角度寸法作図(頂点→1辺目→2辺目の3クリック) ----
@@ -2043,6 +2051,7 @@ document.getElementById('cGrid').onchange = e => { state.grid.show = e.target.ch
 document.getElementById('cSnap').onchange = e => { state.grid.snap = e.target.checked; };
 document.getElementById('cOsnap').onchange = e => { state.grid.osnap = e.target.checked; };
 document.getElementById('cLight').onchange = e => { state.ui.light = e.target.checked; draw(); autosave(); };
+document.getElementById('gPrec').onchange = e => { state.ui.precision = Math.max(0, Math.min(3, parseInt(e.target.value, 10) || 0)); if (numBuiltFor) { const s = selectedShape(); if (s) syncNumValues(s); } draw(); autosave(); };
 document.getElementById('gStep').onchange = e => { state.grid.step = parseFloat(e.target.value); document.getElementById('sgrid').textContent = e.target.value + 'mm'; draw(); };
 
 // 選択図形へスタイル適用
@@ -2586,7 +2595,7 @@ function buildSVGString() {
     if (s.type === 'line' || s.type === 'dim') {
       body += `<line x1="${esc(s.x1 - ox)}" y1="${esc(s.y1 - oy)}" x2="${esc(s.x2 - ox)}" y2="${esc(s.y2 - oy)}" stroke="${st}" stroke-width="${sw}"${da}/>\n`;
       if (s.type === 'dim') {
-        const d = Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(1);
+        const d = fmtLen(Math.hypot(s.x2 - s.x1, s.y2 - s.y1));
         body += `<text x="${esc((s.x1 + s.x2) / 2 - ox)}" y="${esc((s.y1 + s.y2) / 2 - oy - 3)}" fill="${st}" font-size="10" text-anchor="middle">${d} mm</text>\n`;
       }
     } else if (s.type === 'rect') {
@@ -2615,7 +2624,7 @@ function buildSVGString() {
       if (c) { const r = rotatePt(lx, ly, c.x, c.y, s.rot); lx = r.x; ly = r.y; }
       // canvasはラベルも図形と一緒に傾くため、SVGでもラベルを同角度だけ回転させ一致させる
       const labelRot = c ? ` transform="rotate(${(s.rot * 180 / Math.PI).toFixed(3)} ${esc(lx - ox)} ${esc(ly - oy)})"` : '';
-      body += `<text x="${esc(lx - ox)}" y="${esc(ly - oy)}"${labelRot} fill="${st}" font-size="10" text-anchor="middle">${g.deg.toFixed(1)}°</text>\n`;
+      body += `<text x="${esc(lx - ox)}" y="${esc(ly - oy)}"${labelRot} fill="${st}" font-size="10" text-anchor="middle">${fmtLen(g.deg)}°</text>\n`;
     } else if (s.type === 'text') {
       const xe = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const fs = +s.fontSize || 16, lines = String(s.text || '').split('\n');
@@ -2716,7 +2725,7 @@ function buildDXF() {
       polylineLines(layer, angleArcPoints(s), false); // angleArcPointsは回転済み
       const g = angleGeom(s);
       const lp = tp(s, s.vx + Math.cos(g.bis) * (g.r + 4), s.vy + Math.sin(g.bis) * (g.r + 4));
-      e(0, 'TEXT'); e(8, layer); e(10, fx(lp.x)); e(20, fy(lp.y)); e(40, fr(Math.max(2, g.r * 0.3))); e(1, g.deg.toFixed(1) + '°');
+      e(0, 'TEXT'); e(8, layer); e(10, fx(lp.x)); e(20, fy(lp.y)); e(40, fr(Math.max(2, g.r * 0.3))); e(1, fmtLen(g.deg) + '°');
       if (s.rot) e(50, (-s.rot * 180 / Math.PI).toFixed(2)); // 回転時はラベル向きも図形に合わせる
     } else if (s.type === 'text') {
       const align = s.align || 'left';
@@ -3031,6 +3040,7 @@ function loadAutosave() {
       if (['solid', 'dashed', 'dotted'].includes(st.dash)) state.style.dash = st.dash;
     }
     if (o.ui && typeof o.ui === 'object' && typeof o.ui.light === 'boolean') state.ui.light = o.ui.light;
+    if (o.ui && typeof o.ui === 'object' && Number.isInteger(o.ui.precision)) state.ui.precision = Math.max(0, Math.min(3, o.ui.precision));
     return true;
   } catch (e) { return false; }
 }
@@ -3040,6 +3050,7 @@ function syncPrefsUI() {
   document.getElementById('cSnap').checked = state.grid.snap;
   document.getElementById('cOsnap').checked = state.grid.osnap;
   document.getElementById('cLight').checked = !!(state.ui && state.ui.light);
+  document.getElementById('gPrec').value = String((state.ui && Number.isInteger(state.ui.precision)) ? state.ui.precision : 1);
   document.getElementById('gStep').value = String(state.grid.step);
   document.getElementById('sgrid').textContent = state.grid.step + 'mm';
   document.getElementById('pStroke').value = state.style.stroke;

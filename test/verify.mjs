@@ -1339,6 +1339,20 @@ const interRes = await page.evaluate(() => {
 });
 check('交差する2線分の交点(4,0)に吸着', Math.abs(interRes.x - 4) < 0.8 && Math.abs(interRes.y - 0) < 0.8, JSON.stringify(interRes));
 
+// --- BX: 計測ラベルの小数桁数設定 ---
+const precRes = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'dp', type: 'dim', x1: 0, y1: 0, x2: 12.34, y2: 0, stroke: '#fbbf24', strokeWidth: 1.5, fill: null });
+  window.SimpleCAD.state.ui.precision = 0;
+  const svg0 = window.SimpleCAD.buildSVGString();
+  window.SimpleCAD.state.ui.precision = 2;
+  const svg2 = window.SimpleCAD.buildSVGString();
+  window.SimpleCAD.state.ui.precision = 1; // 既定へ戻す
+  return { has0: svg0.includes('>12 mm<'), has2: svg2.includes('>12.34 mm<') };
+});
+check('小数桁0で寸法ラベルが整数表示', precRes.has0, JSON.stringify(precRes));
+check('小数桁2で寸法ラベルが2桁表示', precRes.has2, JSON.stringify(precRes));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
