@@ -2772,29 +2772,68 @@ function parseDXF(text) {
   return shapes;
 }
 function svgPathPolys(d) {
-  const out = []; let cur = null, cx = 0, cy = 0, sx = 0, sy = 0, cmd = '';
+  const out = []; let cur = null, cx = 0, cy = 0, sx = 0, sy = 0, cmd = '', pType = '', pcx = 0, pcy = 0;
   const tokens = String(d || '').match(/[a-zA-Z]|-?\d*\.?\d+(?:[eE]-?\d+)?/g) || [];
   let i = 0;
   const num = () => parseFloat(tokens[i++]);
   const fin = v => Number.isFinite(v);
+  const add = (x, y) => { if (cur && fin(x) && fin(y)) cur.pts.push({ x, y }); };
+  const moveTo = (x, y) => { if (fin(x) && fin(y)) { cx = x; cy = y; } };
+  // 3次/2次ベジェを線分列に分割(N分割)
+  const cubic = (c1x, c1y, c2x, c2y, ex, ey) => {
+    const p0x = cx, p0y = cy, N = 18;
+    for (let t = 1; t <= N; t++) { const u = t / N, m = 1 - u; add(m * m * m * p0x + 3 * m * m * u * c1x + 3 * m * u * u * c2x + u * u * u * ex, m * m * m * p0y + 3 * m * m * u * c1y + 3 * m * u * u * c2y + u * u * u * ey); }
+    pcx = c2x; pcy = c2y; moveTo(ex, ey);
+  };
+  const quad = (qx, qy, ex, ey) => {
+    const p0x = cx, p0y = cy, N = 16;
+    for (let t = 1; t <= N; t++) { const u = t / N, m = 1 - u; add(m * m * p0x + 2 * m * u * qx + u * u * ex, m * m * p0y + 2 * m * u * qy + u * u * ey); }
+    pcx = qx; pcy = qy; moveTo(ex, ey);
+  };
+  // 楕円弧(endpoint→center 変換)を線分列に分割
+  const arc = (rx, ry, xRotDeg, large, sweep, ex, ey) => {
+    const p0x = cx, p0y = cy;
+    if (!fin(ex) || !fin(ey)) return;
+    if (p0x === ex && p0y === ey) return; // 始点==終点: 弧は描かれない(SVG仕様。重複点も挿入しない)
+    if (rx === 0 || ry === 0) { add(ex, ey); moveTo(ex, ey); return; } // 半径0: 終点への直線
+    rx = Math.abs(rx); ry = Math.abs(ry);
+    const phi = (xRotDeg || 0) * Math.PI / 180, cosP = Math.cos(phi), sinP = Math.sin(phi);
+    const dx = (p0x - ex) / 2, dy = (p0y - ey) / 2;
+    const x1 = cosP * dx + sinP * dy, y1 = -sinP * dx + cosP * dy;
+    let rxs = rx * rx, rys = ry * ry; const x1s = x1 * x1, y1s = y1 * y1;
+    const lam = x1s / rxs + y1s / rys; if (lam > 1) { const s = Math.sqrt(lam); rx *= s; ry *= s; rxs = rx * rx; rys = ry * ry; }
+    let numr = rxs * rys - rxs * y1s - rys * x1s; if (numr < 0) numr = 0;
+    const co = ((large !== sweep) ? 1 : -1) * Math.sqrt(numr / (rxs * y1s + rys * x1s || 1));
+    const cxp = co * rx * y1 / ry, cyp = -co * ry * x1 / rx;
+    const ccx = cosP * cxp - sinP * cyp + (p0x + ex) / 2, ccy = sinP * cxp + cosP * cyp + (p0y + ey) / 2;
+    const ang = (ux, uy, vx, vy) => { const dn = Math.hypot(ux, uy) * Math.hypot(vx, vy) || 1; let c = Math.max(-1, Math.min(1, (ux * vx + uy * vy) / dn)); let a = Math.acos(c); if (ux * vy - uy * vx < 0) a = -a; return a; };
+    const theta = ang(1, 0, (x1 - cxp) / rx, (y1 - cyp) / ry);
+    let dTheta = ang((x1 - cxp) / rx, (y1 - cyp) / ry, (-x1 - cxp) / rx, (-y1 - cyp) / ry);
+    if (!sweep && dTheta > 0) dTheta -= 2 * Math.PI;
+    if (sweep && dTheta < 0) dTheta += 2 * Math.PI;
+    const N = Math.max(2, Math.ceil(Math.abs(dTheta) / (Math.PI / 16)));
+    for (let t = 1; t <= N; t++) { const a = theta + dTheta * (t / N); add(ccx + rx * Math.cos(a) * cosP - ry * Math.sin(a) * sinP, ccy + rx * Math.cos(a) * sinP + ry * Math.sin(a) * cosP); }
+    moveTo(ex, ey);
+  };
   while (i < tokens.length) {
     const i0 = i; // 前進監視(不正パスでの無限ループ防止)
     if (/[a-zA-Z]/.test(tokens[i])) { cmd = tokens[i]; i++; }
     const rel = cmd === cmd.toLowerCase(), C = cmd.toUpperCase();
     if (C === 'M') {
       let x = num(), y = num(); if (rel) { x += cx; y += cy; }
-      if (fin(x) && fin(y)) {
-        cx = x; cy = y;
-        if (cur && cur.pts.length >= 2) out.push(cur);
-        cur = { pts: [{ x: cx, y: cy }], closed: false }; sx = cx; sy = cy;
-      }
-      cmd = rel ? 'l' : 'L'; // 後続座標は暗黙のLineTo
-    } else if (C === 'L') { let x = num(), y = num(); if (rel) { x += cx; y += cy; } if (fin(x) && fin(y)) { cx = x; cy = y; if (cur) cur.pts.push({ x: cx, y: cy }); } }
-    else if (C === 'H') { let x = num(); if (rel) x += cx; if (fin(x)) { cx = x; if (cur) cur.pts.push({ x: cx, y: cy }); } }
-    else if (C === 'V') { let y = num(); if (rel) y += cy; if (fin(y)) { cy = y; if (cur) cur.pts.push({ x: cx, y: cy }); } }
-    else if (C === 'Z') { if (cur) { cur.closed = true; out.push(cur); cur = null; } cx = sx; cy = sy; }
-    else { while (i < tokens.length && !/[a-zA-Z]/.test(tokens[i])) i++; if (cur && cur.pts.length >= 2) out.push(cur); cur = null; } // 曲線等は非対応:サブパス終了
-    if (i === i0) i++; // どの分岐でもiが進まなければ強制的に前進(ハング防止)
+      if (fin(x) && fin(y)) { cx = x; cy = y; if (cur && cur.pts.length >= 2) out.push(cur); cur = { pts: [{ x: cx, y: cy }], closed: false }; sx = cx; sy = cy; }
+      cmd = rel ? 'l' : 'L'; pType = 'M'; // 後続座標は暗黙のLineTo
+    } else if (C === 'L') { let x = num(), y = num(); if (rel) { x += cx; y += cy; } add(x, y); moveTo(x, y); pType = 'L'; }
+    else if (C === 'H') { let x = num(); if (rel) x += cx; add(x, cy); moveTo(x, cy); pType = 'H'; }
+    else if (C === 'V') { let y = num(); if (rel) y += cy; add(cx, y); moveTo(cx, y); pType = 'V'; }
+    else if (C === 'C') { let a = num(), b = num(), c2 = num(), d2 = num(), e = num(), f = num(); if (rel) { a += cx; b += cy; c2 += cx; d2 += cy; e += cx; f += cy; } cubic(a, b, c2, d2, e, f); pType = 'C'; }
+    else if (C === 'S') { let c2 = num(), d2 = num(), e = num(), f = num(); if (rel) { c2 += cx; d2 += cy; e += cx; f += cy; } const r = (pType === 'C' || pType === 'S'); cubic(r ? 2 * cx - pcx : cx, r ? 2 * cy - pcy : cy, c2, d2, e, f); pType = 'S'; }
+    else if (C === 'Q') { let a = num(), b = num(), e = num(), f = num(); if (rel) { a += cx; b += cy; e += cx; f += cy; } quad(a, b, e, f); pType = 'Q'; }
+    else if (C === 'T') { let e = num(), f = num(); if (rel) { e += cx; f += cy; } const r = (pType === 'Q' || pType === 'T'); quad(r ? 2 * cx - pcx : cx, r ? 2 * cy - pcy : cy, e, f); pType = 'T'; }
+    else if (C === 'A') { let rx = num(), ry = num(), xr = num(), la = num(), sw = num(), e = num(), f = num(); if (rel) { e += cx; f += cy; } arc(rx, ry, xr, la, sw, e, f); pType = 'A'; }
+    else if (C === 'Z') { if (cur) { cur.closed = true; out.push(cur); cur = null; } cx = sx; cy = sy; pType = 'Z'; }
+    else { while (i < tokens.length && !/[a-zA-Z]/.test(tokens[i])) i++; if (cur && cur.pts.length >= 2) out.push(cur); cur = null; } // 未知コマンド:サブパス終了
+    if (i === i0) i++; // どの分岐でもiが進まなければ強制前進(ハング防止)
   }
   if (cur && cur.pts.length >= 2) out.push(cur);
   return out;

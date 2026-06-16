@@ -1298,6 +1298,25 @@ const fsClamp = await page.evaluate(() => {
 });
 check('巨大fontSizeは上限100000にクランプ', fsClamp === 100000, 'fs=' + fsClamp);
 
+// --- BT: SVG 3次ベジェ(C)を線分列に分割して取り込む ---
+const cubicRes = await page.evaluate(() => {
+  const out = window.SimpleCAD.parseSVG('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 C0 10 10 10 10 0" stroke="#000"/></svg>');
+  const s = out[0]; if (!s || s.type !== 'polyline') return null;
+  const p = s.points;
+  return { n: p.length, x0: p[0].x, y0: p[0].y, xe: p[p.length - 1].x, ye: p[p.length - 1].y, allFinite: p.every(q => Number.isFinite(q.x) && Number.isFinite(q.y)) };
+});
+check('3次ベジェCが多点ポリラインに分割される', cubicRes && cubicRes.n > 5 && cubicRes.allFinite, JSON.stringify(cubicRes));
+check('ベジェCの端点が一致(0,0→10,0)', cubicRes && Math.abs(cubicRes.x0) < 1e-6 && Math.abs(cubicRes.y0) < 1e-6 && Math.abs(cubicRes.xe - 10) < 1e-6 && Math.abs(cubicRes.ye) < 1e-6, JSON.stringify(cubicRes));
+
+// --- BU: SVG 円弧(A)を線分列に分割して取り込む ---
+const arcRes = await page.evaluate(() => {
+  const out = window.SimpleCAD.parseSVG('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 A10 10 0 0 1 10 10" stroke="#000"/></svg>');
+  const s = out[0]; if (!s || s.type !== 'polyline') return null;
+  const p = s.points;
+  return { n: p.length, xe: p[p.length - 1].x, ye: p[p.length - 1].y, allFinite: p.every(q => Number.isFinite(q.x) && Number.isFinite(q.y)) };
+});
+check('円弧Aが線分列に分割され終点が一致(10,10)', arcRes && arcRes.n > 3 && arcRes.allFinite && Math.abs(arcRes.xe - 10) < 0.2 && Math.abs(arcRes.ye - 10) < 0.2, JSON.stringify(arcRes));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
