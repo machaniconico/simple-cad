@@ -431,6 +431,7 @@ let marquee = null;        // 範囲選択ドラッグ {x0,y0,x1,y1(world), add}
 let pointerShift = false;  // 直近pointerdownのShift状態
 let pointerAlt = false;    // 直近pointerdownのAlt状態(Alt+ドラッグ複製)
 let snapMarker = null;     // スナップ表示位置(world)
+let hoverScreen = null;    // 直近のカーソル位置(screen, クロスヘア用)
 
 // 履歴（lastSnapshot = 現在コミット済み状態。pushHistoryは「変更前」状態をundoへ積む）
 const history = { undo: [], redo: [] };
@@ -634,6 +635,17 @@ function draw() {
   if (draft) drawDraft();
   if (polyPts) drawPolyDraft();
   if (marquee) drawMarquee();
+  // クロスヘア(マウス操作・作図ツール時)
+  if (hoverScreen && !coarsePointer && state.tool !== 'select' && state.tool !== 'erase') {
+    ctx.save();
+    ctx.strokeStyle = (state.ui && state.ui.light) ? 'rgba(0,0,0,0.25)' : 'rgba(125,211,252,0.35)';
+    ctx.lineWidth = 1; ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(hoverScreen.x, 0); ctx.lineTo(hoverScreen.x, viewH);
+    ctx.moveTo(0, hoverScreen.y); ctx.lineTo(viewW, hoverScreen.y);
+    ctx.stroke();
+    ctx.restore();
+  }
   if (snapMarker) drawSnapMarker(snapMarker);
   updateStatusCounts();
   updateNumPanel();
@@ -1221,6 +1233,8 @@ cv.addEventListener('pointermove', e => {
   const w = { x: S2Wx(p.x), y: S2Wy(p.y) };
   document.getElementById('sx').textContent = w.x.toFixed(1);
   document.getElementById('sy').textContent = w.y.toFixed(1);
+  hoverScreen = p;
+  if (e.pointerType) coarsePointer = (e.pointerType === 'touch' || e.pointerType === 'pen');
 
   if (panning) {
     state.view.offsetX += e.movementX; state.view.offsetY += e.movementY;
@@ -1241,6 +1255,7 @@ function endPointer(e) {
 }
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinch = null; panning = false; draft = null; marquee = null; dragMove = null; handleDrag = null; });
+cv.addEventListener('pointerleave', () => { if (hoverScreen) { hoverScreen = null; draw(); } });
 
 // ホイールズーム
 cv.addEventListener('wheel', e => {

@@ -881,6 +881,23 @@ await page.evaluate(() => document.querySelector('#exportMenu button[data-exp=sv
 menuDisp = await page.evaluate(() => document.getElementById('exportMenu').style.display);
 check('項目クリックでメニューが閉じる', menuDisp === 'none', 'disp=' + menuDisp);
 
+// --- AO: クロスヘア(マウス・作図ツール時) ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.state.ui.light = false; window.SimpleCAD.state.grid.show = false; window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 }; window.SimpleCAD.setTool('line'); window.SimpleCAD.draw(); });
+// グリッドOFFにして、クロスヘア縦線列のα合計で判定
+const colSum = async () => page.evaluate(() => {
+  const cv = document.getElementById('cv'); const c = cv.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const x = Math.round(307 * dpr); let s = 0;
+  for (let y = 10; y < 400; y += 10) s += c.getImageData(x, Math.round(y * dpr), 1, 1).data[3];
+  return s;
+});
+await page.mouse.move(0 + 307, 51 + 200);
+const lineSum = await colSum();
+check('作図ツール時にクロスヘアが描画される', lineSum > 200, 'sum=' + lineSum);
+await page.evaluate(() => { window.SimpleCAD.setTool('select'); window.SimpleCAD.draw(); });
+const selSum = await colSum();
+check('選択ツールではクロスヘアが出ない', selSum === 0, 'sum=' + selSum);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
