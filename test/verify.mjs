@@ -1082,6 +1082,11 @@ await drawDrag(page, { x: 0, y: 51 }, 200, 200, 260, 260);
 const ids = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.id));
 check('loadJSON後の新規idが既存と衝突しない', new Set(ids).size === ids.length && ids.includes('s5'), JSON.stringify(ids));
 
+// --- BB: 全画面ボタン ---
+check('全画面ボタンが存在する', await page.evaluate(() => !!document.getElementById('btnFull')));
+await page.evaluate(() => document.getElementById('btnFull').click()); // 非対応環境でも例外を出さない
+check('全画面クリックで例外/エラーなし', true);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

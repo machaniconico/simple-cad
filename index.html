@@ -184,6 +184,7 @@
       <button class="tbtn" id="btnFit" title="画面に合わせる">⤢ Fit</button>
       <button class="tbtn" id="btnLayers" title="レイヤー">🗂 レイヤー</button>
       <button class="tbtn" id="btnHelp" title="ヘルプ (?)">？</button>
+      <button class="tbtn" id="btnFull" title="全画面">⛶</button>
     </div>
     <div class="sep"></div>
     <div class="group">
@@ -1853,6 +1854,19 @@ function moveSelectionToActive() {
 // ヘルプ開閉
 const helpEl = document.getElementById('help');
 function toggleHelp(show) { helpEl.style.display = (show === undefined ? helpEl.style.display === 'none' : show) ? 'flex' : 'none'; }
+// 全画面トグル(対応環境のみ。非対応/拒否時は黙ってスキップ)
+document.getElementById('btnFull').onclick = () => {
+  try {
+    if (!document.fullscreenElement) {
+      const el = document.getElementById('app');
+      if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    } else if (document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  } catch (_) {}
+};
+document.addEventListener('fullscreenchange', () => { setTimeout(resize, 50); });
+
 document.getElementById('btnHelp').onclick = () => toggleHelp(true);
 document.getElementById('helpClose').onclick = () => toggleHelp(false);
 helpEl.addEventListener('click', e => { if (e.target === helpEl) toggleHelp(false); });
