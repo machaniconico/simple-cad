@@ -1003,6 +1003,30 @@ await page.evaluate(() => { document.getElementById('expSelOnly').checked = fals
 const svgAll = await page.evaluate(() => window.SimpleCAD.buildSVGString());
 check('解除で全図形(矩形+円)', svgAll.includes('<circle') && svgAll.includes('<rect x'), '');
 
+// --- AW: 円弧ツール ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 }; window.SimpleCAD.state.grid.snap = false; window.SimpleCAD.setTool('arc'); });
+// 中心(100,100)→始点(160,100 右)→終点(100,160 下) の3クリック
+await page.mouse.click(0 + 100 * 2, 51 + 100 * 2);
+await page.mouse.click(0 + 160 * 2, 51 + 100 * 2);
+await page.mouse.click(0 + 100 * 2, 51 + 160 * 2);
+const arc = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'arc'));
+check('円弧が作図される(中心100,100 半径60)', arc && Math.abs(arc.cx - 100) < 1 && Math.abs(arc.r - 60) < 1, JSON.stringify(arc && { cx: arc.cx, r: arc.r }));
+// 円弧上の点(右端160,100付近)でヒット、範囲外(左端40,100)でヒットしない
+const hitOn = await page.evaluate(() => !!window.SimpleCAD.hitTest(160, 100));
+const hitOff = await page.evaluate(() => !!window.SimpleCAD.hitTest(40, 100));
+check('円弧は弧上でヒットする', hitOn === true);
+check('円弧は範囲外ではヒットしない', hitOff === false);
+// SVG/DXFに点列で出力
+const svgArc = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('円弧がSVGにpolylineで出力', svgArc.includes('<polyline'), '');
+const dxfArc = await page.evaluate(() => window.SimpleCAD.buildDXF());
+check('円弧がDXFにLINEで出力されNaN無し', dxfArc.includes('LINE') && !dxfArc.includes('NaN'), '');
+// 保存読込で復元
+const dA = await page.evaluate(() => window.SimpleCAD.dumpJSON());
+await page.evaluate(() => window.SimpleCAD.clearAll());
+await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dA);
+check('円弧が保存読込で復元', await page.evaluate(() => !!window.SimpleCAD.state.shapes.find(s => s.type === 'arc')));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

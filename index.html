@@ -219,6 +219,7 @@
       <button class="tool" data-tool="rect" title="矩形">▭<span class="lbl">矩形</span></button>
       <button class="tool" data-tool="circle" title="円">◯<span class="lbl">円</span></button>
       <button class="tool" data-tool="ellipse" title="楕円">⬭<span class="lbl">楕円</span></button>
+      <button class="tool" data-tool="arc" title="円弧(中心→始点→終点)">⌒<span class="lbl">円弧</span></button>
       <button class="tool" data-tool="polyline" title="ポリライン">⏚<span class="lbl">連線</span></button>
       <button class="tool" data-tool="polygon" title="正多角形">⬡<span class="lbl">多角</span></button>
       <button class="tool" data-tool="text" title="文字">A<span class="lbl">文字</span></button>
@@ -430,6 +431,7 @@ function ensureLayers() {
 // 描画途中の一時状態
 let draft = null;          // 線/矩形/円/寸法の作図中データ
 let polyPts = null;        // ポリライン作図中の点列
+let arcDraft = null;       // 円弧作図中 {cx,cy,r,a0,a1,stage}
 let dragMove = null;       // 選択移動中 {ids, startWorld, orig:Map}
 let handleDrag = null;     // 変形(リサイズ/回転)中
 let marquee = null;        // 範囲選択ドラッグ {x0,y0,x1,y1(world), add}
@@ -597,6 +599,8 @@ function sanitizeShape(s) {
       return { ...base, type: 'circle', cx: num(s.cx), cy: num(s.cy), r: Math.max(0, num(s.r)) };
     case 'ellipse':
       return { ...base, type: 'ellipse', cx: num(s.cx), cy: num(s.cy), rx: Math.max(0, num(s.rx)), ry: Math.max(0, num(s.ry)) };
+    case 'arc':
+      return { ...base, type: 'arc', cx: num(s.cx), cy: num(s.cy), r: Math.max(0, num(s.r)), a0: num(s.a0), a1: num(s.a1) };
     case 'polyline':
       if (!Array.isArray(s.points) || !s.points.length) return null;
       return { ...base, type: 'polyline', closed: !!s.closed, points: s.points.map(p => ({ x: num(p && p.x), y: num(p && p.y) })) };
@@ -653,6 +657,7 @@ function draw() {
   }
   if (draft) drawDraft();
   if (polyPts) drawPolyDraft();
+  if (arcDraft) drawArcDraft();
   if (marquee) drawMarquee();
   // クロスヘア(マウス操作・作図ツール時)
   if (hoverScreen && !coarsePointer && state.tool !== 'select' && state.tool !== 'erase') {
@@ -752,6 +757,9 @@ function drawShape(s, selected) {
   } else if (s.type === 'ellipse') {
     ctx.ellipse(W2Sx(s.cx), W2Sy(s.cy), s.rx * state.view.scale, s.ry * state.view.scale, 0, 0, Math.PI * 2);
     if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(); }
+    ctx.stroke();
+  } else if (s.type === 'arc') {
+    ctx.arc(W2Sx(s.cx), W2Sy(s.cy), s.r * state.view.scale, s.a0, s.a1);
     ctx.stroke();
   } else if (s.type === 'polyline') {
     const p = s.points;
@@ -962,12 +970,13 @@ function fieldsFor(s) {
   if (s.type === 'rect') return [['x', 'X'], ['y', 'Y'], ['w', '幅'], ['h', '高さ']];
   if (s.type === 'circle') return [['cx', '中心X'], ['cy', '中心Y'], ['r', '半径']];
   if (s.type === 'ellipse') return [['cx', '中心X'], ['cy', '中心Y'], ['rx', '横半径'], ['ry', '縦半径']];
+  if (s.type === 'arc') return [['cx', '中心X'], ['cy', '中心Y'], ['r', '半径']];
   if (s.type === 'text') return [['x', 'X'], ['y', 'Y'], ['fontSize', '字高']];
   if (s.type === 'image') return [['x', 'X'], ['y', 'Y'], ['w', '幅'], ['h', '高さ'], ['opacity', '不透明度']];
   if (s.type === 'polyline') return []; // 編集欄は無いが計測情報は表示
   return null;
 }
-const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', ellipse: '楕円', polyline: 'ポリライン', text: 'テキスト', image: '画像' }[t] || t);
+const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', ellipse: '楕円', arc: '円弧', polyline: 'ポリライン', text: 'テキスト', image: '画像' }[t] || t);
 // 円/楕円に半径寸法(中心→右端のdim)を追加
 function addRadiusDim(s) {
   const r = s.type === 'circle' ? s.r : s.rx;
@@ -982,6 +991,7 @@ function measureInfo(s) {
   if (s.type === 'rect') return '面積 ' + f1(Math.abs(s.w * s.h)) + ' mm² / 周 ' + f1(2 * (Math.abs(s.w) + Math.abs(s.h))) + ' mm';
   if (s.type === 'circle') return '面積 ' + f1(Math.PI * s.r * s.r) + ' mm² / 円周 ' + f1(2 * Math.PI * s.r) + ' mm';
   if (s.type === 'ellipse') return '面積 ' + f1(Math.PI * s.rx * s.ry) + ' mm²';
+  if (s.type === 'arc') { let sp = Math.abs(s.a1 - s.a0) % (2 * Math.PI); return '弧長 ' + f1(s.r * sp) + ' mm / r' + f1(s.r); }
   if (s.type === 'polyline') {
     const p = s.points; let len = 0;
     for (let i = 0; i < p.length - 1; i++) len += Math.hypot(p[i + 1].x - p[i].x, p[i + 1].y - p[i].y);
@@ -1081,6 +1091,7 @@ function bbox(s) {
   if (s.type === 'rect') return { x: s.x, y: s.y, w: s.w, h: s.h };
   if (s.type === 'circle') return { x: s.cx - s.r, y: s.cy - s.r, w: s.r * 2, h: s.r * 2 };
   if (s.type === 'ellipse') return { x: s.cx - s.rx, y: s.cy - s.ry, w: s.rx * 2, h: s.ry * 2 };
+  if (s.type === 'arc') return { x: s.cx - s.r, y: s.cy - s.r, w: s.r * 2, h: s.r * 2 };
   if (s.type === 'polyline') {
     const xs = s.points.map(p => p.x), ys = s.points.map(p => p.y);
     return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
@@ -1133,6 +1144,16 @@ function hitTest(wx, wy) {
       // 楕円輪郭付近: 法線方向の距離近似で判定
       const rr = Math.hypot(nx, ny);
       if (rr > 0 && Math.abs(rr - 1) * Math.min(s.rx, s.ry) < thr) return s;
+    } else if (s.type === 'arc') {
+      const d = Math.hypot(qx - s.cx, qy - s.cy);
+      if (Math.abs(d - s.r) < thr) { // 半径が近く、かつ角度が円弧範囲内
+        let ang = Math.atan2(qy - s.cy, qx - s.cx);
+        const norm = a => { a %= 2 * Math.PI; return a < 0 ? a + 2 * Math.PI : a; };
+        let a0 = norm(s.a0), a1 = norm(s.a1), aa = norm(ang);
+        let span = a1 - a0; if (span < 0) span += 2 * Math.PI;
+        let rel = aa - a0; if (rel < 0) rel += 2 * Math.PI;
+        if (rel <= span + 1e-6) return s;
+      }
     } else if (s.type === 'polyline') {
       const p = s.points;
       for (let k = 0; k < p.length - 1; k++)
@@ -1197,6 +1218,9 @@ function scaleShapeAbout(s, ax, ay, sx, sy) {
   } else if (s.type === 'ellipse') {
     const cc = f(s.cx, s.cy); s.cx = cc.x; s.cy = cc.y;
     s.rx = Math.max(0.01, s.rx * Math.abs(sx)); s.ry = Math.max(0.01, s.ry * Math.abs(sy));
+  } else if (s.type === 'arc') {
+    const cc = f(s.cx, s.cy); s.cx = cc.x; s.cy = cc.y;
+    s.r = Math.max(0.01, s.r * (Math.abs(sx) + Math.abs(sy)) / 2);
   } else if (s.type === 'text') {
     const pp = f(s.x, s.y); s.x = pp.x; s.y = pp.y;
     s.fontSize = Math.max(1, s.fontSize * Math.abs(sy));
@@ -1211,6 +1235,7 @@ function translateShape(s, dx, dy) {
   else if (s.type === 'rect') { s.x += dx; s.y += dy; }
   else if (s.type === 'circle') { s.cx += dx; s.cy += dy; }
   else if (s.type === 'ellipse') { s.cx += dx; s.cy += dy; }
+  else if (s.type === 'arc') { s.cx += dx; s.cy += dy; }
   else if (s.type === 'text' || s.type === 'image') { s.x += dx; s.y += dy; }
   else if (s.type === 'polyline') for (const p of s.points) { p.x += dx; p.y += dy; }
 }
@@ -1383,6 +1408,7 @@ function onToolDown(p) {
   else if (t === 'circle') { draft = { type: 'circle', cx: w.x, cy: w.y, r: 0 }; }
   else if (t === 'ellipse') { draft = { type: 'ellipse', cx: w.x, cy: w.y, rx: 0, ry: 0, _ox: w.x, _oy: w.y }; }
   else if (t === 'polygon') { draft = { type: 'polygon', cx: w.x, cy: w.y, r: 0, sides: state.style.sides }; }
+  else if (t === 'arc') { handleArcTap(w); }
   else if (t === 'polyline') { handlePolyTap(w); }
   else if (t === 'text') { openTextEditor(w, null); }
   draw();
@@ -1481,6 +1507,7 @@ function onToolMove(p) {
     draw(); return;
   }
 
+  if (arcDraft) { const w = resolvePoint(p.x, p.y); updateArcDraft(w); draw(); return; }
   if (!draft) {
     // 選択ツールでなければスナップマーカーだけ更新
     if (t !== 'select') { resolvePoint(p.x, p.y); draw(); }
@@ -1619,6 +1646,39 @@ textInput.addEventListener('keydown', e => {
 });
 textInput.addEventListener('blur', commitTextEditor);
 
+// ---- 円弧作図(中心→始点(半径/開始角)→終点(終了角)) ----
+function handleArcTap(w) {
+  if (!arcDraft) { arcDraft = { cx: w.x, cy: w.y, r: 0, a0: 0, a1: 0, stage: 1 }; return; }
+  if (arcDraft.stage === 1) {
+    arcDraft.r = Math.hypot(w.x - arcDraft.cx, w.y - arcDraft.cy);
+    arcDraft.a0 = Math.atan2(w.y - arcDraft.cy, w.x - arcDraft.cx);
+    arcDraft.a1 = arcDraft.a0; arcDraft.stage = 2;
+  } else {
+    arcDraft.a1 = Math.atan2(w.y - arcDraft.cy, w.x - arcDraft.cx);
+    if (arcDraft.r > 0.01 && Math.abs(arcDraft.a1 - arcDraft.a0) > 1e-4) {
+      state.shapes.push({ id: uid(), type: 'arc', cx: arcDraft.cx, cy: arcDraft.cy, r: arcDraft.r, a0: arcDraft.a0, a1: arcDraft.a1,
+        stroke: state.style.stroke, strokeWidth: state.style.strokeWidth, fill: null, dash: state.style.dash, layer: state.activeLayer });
+      pushHistory();
+    }
+    arcDraft = null;
+  }
+}
+function updateArcDraft(w) {
+  if (!arcDraft) return;
+  if (arcDraft.stage === 1) { arcDraft.r = Math.hypot(w.x - arcDraft.cx, w.y - arcDraft.cy); arcDraft.a0 = Math.atan2(w.y - arcDraft.cy, w.x - arcDraft.cx); arcDraft.a1 = arcDraft.a0; }
+  else { arcDraft.a1 = Math.atan2(w.y - arcDraft.cy, w.x - arcDraft.cx); }
+}
+function drawArcDraft() {
+  applyStyle(state.style);
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  if (arcDraft.stage === 1) ctx.arc(W2Sx(arcDraft.cx), W2Sy(arcDraft.cy), arcDraft.r * state.view.scale, 0, Math.PI * 2);
+  else ctx.arc(W2Sx(arcDraft.cx), W2Sy(arcDraft.cy), arcDraft.r * state.view.scale, arcDraft.a0, arcDraft.a1);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  showMeasure(W2Sx(arcDraft.cx), W2Sy(arcDraft.cy), 'r ' + arcDraft.r.toFixed(1));
+}
+
 document.getElementById('plDone').onclick = () => commitPoly(false);
 document.getElementById('plCancel').onclick = () => { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); draw(); };
 // ダブルタップ/ダブルクリック: ポリライン確定 or テキスト編集
@@ -1635,6 +1695,7 @@ cv.addEventListener('dblclick', e => {
 document.querySelectorAll('.tool').forEach(b => {
   b.addEventListener('click', () => {
     if (polyPts) commitPoly(false);
+    arcDraft = null;
     document.querySelectorAll('.tool').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
     state.tool = b.dataset.tool;
@@ -2100,7 +2161,7 @@ window.addEventListener('keydown', e => {
   // ツール切替(単独キー)
   if (!mod && !e.altKey && TOOL_KEYS[e.key.toLowerCase()]) { e.preventDefault(); activateTool(TOOL_KEYS[e.key.toLowerCase()]); }
   if (e.key === 'Enter' && polyPts) commitPoly(false);
-  if (e.key === 'Escape') { if (helpEl.style.display !== 'none') { toggleHelp(false); return; } draft = null; if (polyPts) { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
+  if (e.key === 'Escape') { if (helpEl.style.display !== 'none') { toggleHelp(false); return; } draft = null; arcDraft = null; if (polyPts) { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
 });
 window.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; if (e.key === 'Shift') shiftHeld = false; });
 
@@ -2197,6 +2258,9 @@ function buildSVGString() {
       body += `<circle cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" r="${esc(s.r)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"${da}/>\n`;
     } else if (s.type === 'ellipse') {
       body += `<ellipse cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" rx="${esc(s.rx)}" ry="${esc(s.ry)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"${da}/>\n`;
+    } else if (s.type === 'arc') {
+      const pts = arcSamplePoints(s).map(p => `${esc(p.x - ox)},${esc(p.y - oy)}`).join(' ');
+      body += `<polyline points="${pts}" stroke="${st}" stroke-width="${sw}" fill="none"${da}/>\n`;
     } else if (s.type === 'polyline') {
       const pts = s.points.map(p => `${esc(p.x - ox)},${esc(p.y - oy)}`).join(' ');
       const tag = s.closed ? 'polygon' : 'polyline';
@@ -2227,6 +2291,21 @@ function exportPNG() {
   c.fillStyle = '#ffffff'; c.fillRect(0, 0, off.width, off.height);
   c.drawImage(cv, 0, 0, off.width, off.height);
   off.toBlob(b => downloadBlob(b, 'drawing.png'));
+}
+
+// 円弧を点列にサンプリング(SVG/DXF出力用。回転考慮)
+function arcSamplePoints(s) {
+  let span = s.a1 - s.a0;
+  // ctx.arc 既定(反時計回りfalse=時計回り描画)に合わせ、a1>=a0方向で増加
+  const seg = Math.max(2, Math.ceil(Math.abs(span) / (Math.PI / 32)));
+  const pts = [];
+  for (let i = 0; i <= seg; i++) {
+    const a = s.a0 + span * (i / seg);
+    let x = s.cx + s.r * Math.cos(a), y = s.cy + s.r * Math.sin(a);
+    if (s.rot) { const r = rotatePt(x, y, s.cx, s.cy, s.rot); x = r.x; y = r.y; }
+    pts.push({ x, y });
+  }
+  return pts;
 }
 
 // 書き出し対象の図形(可視。「選択範囲のみ」ONかつ選択ありなら選択図形に限定)
@@ -2272,6 +2351,8 @@ function buildDXF() {
       polylineLines(layer, pts, true);
     } else if (s.type === 'polyline') {
       polylineLines(layer, s.points.map(p => tp(s, p.x, p.y)), s.closed);
+    } else if (s.type === 'arc') {
+      polylineLines(layer, arcSamplePoints(s), false);
     } else if (s.type === 'text') {
       const p = tp(s, s.x, s.y + s.fontSize); // DXF TEXTはベースライン基準
       e(0, 'TEXT'); e(8, layer); e(10, fx(p.x)); e(20, fy(p.y)); e(40, fr(s.fontSize || 16)); e(1, String(s.text || '').replace(/[\r\n\t]/g, ' '));
