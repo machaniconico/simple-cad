@@ -572,10 +572,9 @@ await page.evaluate(() => {
   window.SimpleCAD.state.grid.snap = false;
   window.SimpleCAD.state.grid.step = 50;
   window.SimpleCAD.state.style.stroke = '#ff8800';
-  // autosaveを強制発火
   window.SimpleCAD.addShape({ id: 'pf', type: 'rect', x: 0, y: 0, w: 5, h: 5, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.saveNow(); // デバウンス待ちせず同期保存
 });
-await page.waitForTimeout(500); // autosave debounce
 await page.reload();
 await page.waitForFunction(() => window.SimpleCAD, null, { timeout: 5000 });
 const prefs = await page.evaluate(() => ({ snap: window.SimpleCAD.state.grid.snap, step: window.SimpleCAD.state.grid.step, stroke: window.SimpleCAD.state.style.stroke, uiStep: document.getElementById('gStep').value, uiStroke: document.getElementById('pStroke').value }));
@@ -675,6 +674,14 @@ check('複製側が選択される', altRes.sel === 1, 'sel=' + altRes.sel);
 await page.evaluate(() => window.SimpleCAD.undo());
 const undoCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
 check('Alt複製はUndoで1個に戻る', undoCnt === 1, 'count=' + undoCnt);
+
+// --- AC: ヘルプパネル ---
+await page.evaluate(() => window.SimpleCAD && document.getElementById('btnHelp').click());
+let helpDisp = await page.evaluate(() => getComputedStyle(document.getElementById('help')).display);
+check('ヘルプボタンで開く', helpDisp === 'flex', 'display=' + helpDisp);
+await page.evaluate(() => document.getElementById('helpClose').click());
+helpDisp = await page.evaluate(() => document.getElementById('help').style.display);
+check('閉じるボタンで閉じる', helpDisp === 'none', 'display=' + helpDisp);
 
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
