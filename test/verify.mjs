@@ -1402,6 +1402,13 @@ const dxfCol = await page.evaluate(() => {
 check('DXF ACI色(62=1→赤)を取り込む', dxfCol.line === '#ff0000', JSON.stringify(dxfCol));
 check('DXF trueColor(420→緑)を取り込む', dxfCol.circle === '#00ff00', JSON.stringify(dxfCol));
 
+// --- CD: SVG取り込みで線幅(stroke-width)を反映 ---
+const svgSW = await page.evaluate(() => {
+  const out = window.SimpleCAD.parseSVG('<svg xmlns="http://www.w3.org/2000/svg"><line x1="0" y1="0" x2="10" y2="0" stroke="#000" stroke-width="3"/></svg>');
+  return out[0] ? out[0].strokeWidth : null;
+});
+check('SVG stroke-widthを取り込む', Math.abs(svgSW - 3) < 1e-6, 'sw=' + svgSW);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

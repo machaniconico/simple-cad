@@ -2903,6 +2903,7 @@ function parseSVG(text) {
   for (const el of root.querySelectorAll('line,rect,circle,ellipse,polyline,polygon,text,path')) {
     const tag = el.tagName.toLowerCase(), rot = rotOf(el);
     const base = { stroke: strokeOf(el) }; if (rot) base.rot = rot;
+    const sw = parseFloat(el.getAttribute('stroke-width')); if (Number.isFinite(sw) && sw > 0) base.strokeWidth = sw; // 線幅も取り込む(sanitizeで下限0.1)
     if (tag === 'line') shapes.push({ ...base, type: 'line', x1: nf(el, 'x1'), y1: nf(el, 'y1'), x2: nf(el, 'x2'), y2: nf(el, 'y2') });
     else if (tag === 'rect') shapes.push({ ...base, type: 'rect', x: nf(el, 'x'), y: nf(el, 'y'), w: nf(el, 'width'), h: nf(el, 'height'), fill: fillOf(el) });
     else if (tag === 'circle') shapes.push({ ...base, type: 'circle', cx: nf(el, 'cx'), cy: nf(el, 'cy'), r: nf(el, 'r'), fill: fillOf(el) });
