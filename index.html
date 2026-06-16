@@ -189,6 +189,7 @@
       <button class="tbtn" id="btnSvg" title="SVG書き出し">SVG</button>
       <button class="tbtn" id="btnPng" title="PNG書き出し">PNG</button>
       <button class="tbtn" id="btnPdf" title="PDF書き出し(実寸)">PDF</button>
+      <button class="tbtn" id="btnDxf" title="DXF書き出し(CAD相互運用)">DXF</button>
     </div>
     <input type="file" id="fileInput" accept="application/json,.json" style="display:none">
     <input type="file" id="imgInput" accept="image/*" style="display:none">
@@ -1710,6 +1711,7 @@ document.getElementById('fileInput').onchange = e => {
 document.getElementById('btnSvg').onclick = exportSVG;
 document.getElementById('btnPng').onclick = exportPNG;
 document.getElementById('btnPdf').onclick = exportPDF;
+document.getElementById('btnDxf').onclick = exportDXF;
 
 // 画像配置(トレース用): 画像を読み込み、ビュー中央に実寸配置
 document.getElementById('btnImg').onclick = () => document.getElementById('imgInput').click();
@@ -2040,6 +2042,58 @@ function exportPNG() {
   off.toBlob(b => downloadBlob(b, 'drawing.png'));
 }
 
+// ---- DXF書き出し（R12 ASCII・依存なし。他CADとの相互運用用）----
+// DXFはY軸が上向きなので符号反転。回転はrot考慮で頂点を実座標化してから出力。
+function buildDXF() {
+  const shapes = state.shapes.filter(isVisible);
+  if (!shapes.length) return '';
+  const out = [];
+  const e = (c, v) => { out.push(String(c)); out.push(String(v)); };
+  const fy = y => (-y).toFixed(4);
+  const fx = x => (x).toFixed(4);
+  // 回転を反映した実world座標
+  const tp = (s, x, y) => {
+    if (!s.rot) return { x, y };
+    const c = shapeCenter(s);
+    return rotatePt(x, y, c.x, c.y, s.rot);
+  };
+  const line = (layer, x1, y1, x2, y2) => { e(0, 'LINE'); e(8, layer); e(10, fx(x1)); e(20, fy(y1)); e(11, fx(x2)); e(21, fy(y2)); };
+  const polylineLines = (layer, pts, closed) => {
+    for (let i = 0; i < pts.length - 1; i++) line(layer, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
+    if (closed && pts.length > 1) line(layer, pts[pts.length - 1].x, pts[pts.length - 1].y, pts[0].x, pts[0].y);
+  };
+  e(0, 'SECTION'); e(2, 'ENTITIES');
+  for (const s of shapes) {
+    const layer = String(s.layer || '0').replace(/[^A-Za-z0-9_]/g, '_') || '0';
+    if (s.type === 'line' || s.type === 'dim') {
+      const a = tp(s, s.x1, s.y1), b = tp(s, s.x2, s.y2); line(layer, a.x, a.y, b.x, b.y);
+    } else if (s.type === 'rect') {
+      const c = [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]].map(([x, y]) => tp(s, x, y));
+      polylineLines(layer, c, true);
+    } else if (s.type === 'circle') {
+      const c = tp(s, s.cx, s.cy); e(0, 'CIRCLE'); e(8, layer); e(10, fx(c.x)); e(20, fy(c.y)); e(40, s.r.toFixed(4));
+    } else if (s.type === 'ellipse') {
+      const seg = 48, pts = [];
+      for (let i = 0; i < seg; i++) { const ang = i / seg * 2 * Math.PI; pts.push(tp(s, s.cx + s.rx * Math.cos(ang), s.cy + s.ry * Math.sin(ang))); }
+      polylineLines(layer, pts, true);
+    } else if (s.type === 'polyline') {
+      polylineLines(layer, s.points.map(p => tp(s, p.x, p.y)), s.closed);
+    } else if (s.type === 'text') {
+      const p = tp(s, s.x, s.y + s.fontSize); // DXF TEXTはベースライン基準
+      e(0, 'TEXT'); e(8, layer); e(10, fx(p.x)); e(20, fy(p.y)); e(40, (s.fontSize || 16).toFixed(4)); e(1, String(s.text || '').replace(/\n/g, ' '));
+      if (s.rot) e(50, (-s.rot * 180 / Math.PI).toFixed(2));
+    }
+    // image は DXF 非対応のためスキップ
+  }
+  e(0, 'ENDSEC'); e(0, 'EOF');
+  return out.join('\r\n') + '\r\n';
+}
+function exportDXF() {
+  const dxf = buildDXF();
+  if (!dxf) { toast('表示中の図形がありません'); return; }
+  downloadBlob(new Blob([dxf], { type: 'application/dxf' }), 'drawing.dxf');
+}
+
 // ---- PDF書き出し（実寸・依存なし。SVGを高解像度ラスタライズしFlateで埋め込み）----
 function drawingExtentMM() {
   const e = computeExtent(state.shapes.filter(isVisible));
@@ -2201,6 +2255,7 @@ function init() {
 window.SimpleCAD = {
   state, draw, fitView, undo, redo,
   buildSVGString,
+  buildDXF,
   buildPDFBlob,
   exportPNG,
   hitTest, resolvePoint,

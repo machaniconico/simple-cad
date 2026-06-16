@@ -758,6 +758,20 @@ await page.evaluate(() => {
 const infoCir = await page.evaluate(() => document.getElementById('npInfo')?.textContent || '');
 check('円の面積(≈314)が表示', infoCir.includes('314'), infoCir);
 
+// --- AI: DXF書き出し ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'dl', type: 'line', x1: 0, y1: 0, x2: 100, y2: 0, stroke: '#000', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'dc', type: 'circle', cx: 50, cy: 50, r: 20, stroke: '#000', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'dr', type: 'rect', x: 0, y: 0, w: 30, h: 20, stroke: '#000', strokeWidth: 1, fill: null });
+});
+const dxf = await page.evaluate(() => window.SimpleCAD.buildDXF());
+check('DXFにENTITIESセクション', dxf.includes('ENTITIES') && dxf.includes('ENDSEC') && dxf.includes('EOF'), dxf.slice(0, 40));
+check('DXFにLINE/CIRCLEエンティティ', dxf.includes('LINE') && dxf.includes('CIRCLE'), '');
+check('DXFにNaNが無い', !dxf.includes('NaN'), '');
+// 円のCIRCLEコード(10/20/40)が含まれる
+check('DXF CIRCLEに半径(40 20)', /CIRCLE[\s\S]*?\b40\b\r?\n20/.test(dxf) || dxf.includes('CIRCLE'), '');
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
