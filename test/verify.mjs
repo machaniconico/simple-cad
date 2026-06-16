@@ -1317,6 +1317,15 @@ const arcRes = await page.evaluate(() => {
 });
 check('円弧Aが線分列に分割され終点が一致(10,10)', arcRes && arcRes.n > 3 && arcRes.allFinite && Math.abs(arcRes.xe - 10) < 0.2 && Math.abs(arcRes.ye - 10) < 0.2, JSON.stringify(arcRes));
 
+// --- BV: 重複layer idの一意化(バグハント#8) ---
+const layerDedup = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.loadJSON({ shapes: [], layers: [{ id: 'L1', name: 'a' }, { id: 'L1', name: 'b' }, { id: 'L1', name: 'c' }], activeLayer: 'L1' });
+  const ids = window.SimpleCAD.state.layers.map(l => l.id);
+  return { ids, unique: new Set(ids).size === ids.length };
+});
+check('重複layer idは一意化される', layerDedup.unique && layerDedup.ids.length === 3, JSON.stringify(layerDedup));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

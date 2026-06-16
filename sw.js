@@ -1,5 +1,5 @@
 // SimpleCAD Service Worker — オフライン対応(cache-first)
-const CACHE = 'simplecad-v27';
+const CACHE = 'simplecad-v28';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', e => {

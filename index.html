@@ -681,11 +681,15 @@ function sanitizeShapes(arr) {
 }
 function sanitizeLayers(arr) {
   if (!Array.isArray(arr) || !arr.length) return null;
-  return arr.map((l, i) => l && typeof l === 'object' ? {
+  const out = arr.map((l, i) => l && typeof l === 'object' ? {
     id: String(l.id || ('L' + (i + 1))).slice(0, 40),
     name: String(l.name || ('レイヤー' + (i + 1))).slice(0, 100),
     visible: l.visible !== false, locked: !!l.locked,
   } : null).filter(Boolean);
+  // layer id重複は一意化(getLayer取り違え防止)。カウンタ付与で必ず前進(無限ループ防止)
+  const seen = new Set(); let k = 0;
+  for (const l of out) { while (seen.has(l.id)) l.id = l.id.slice(0, 36) + '_' + (++k); seen.add(l.id); }
+  return out;
 }
 // viewは scale が有限かつ正のときのみ採用（壊れた値で空白キャンバスになるのを防ぐ）
 function safeView(v) {
@@ -1464,8 +1468,8 @@ cv.addEventListener('pointermove', e => {
     const [a, b] = [...pointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
     const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
-    // ズーム（中点を中心に）
-    const factor = dist / (pinch.dist || dist);
+    // ズーム（中点を中心に）。両距離が正のときのみ(ゼロ距離でのNaN/Infinity防止)
+    const factor = (pinch.dist > 0 && dist > 0) ? dist / pinch.dist : 1;
     zoomAt(cx, cy, factor);
     // パン（中点移動分）
     state.view.offsetX += cx - pinch.cx;
@@ -2980,6 +2984,7 @@ function loadAutosave() {
     state.shapes = sanitizeShapes(o.shapes);
     const v = safeView(o.view); if (v) state.view = v;
     if (isNum(o.nextId)) nextId = +o.nextId;
+    bumpNextId(); // 保存nextIdとsanitizeShapesの再採番idの双方より確実に上へ(uid衝突防止)
     const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls;
     if (o.activeLayer) state.activeLayer = String(o.activeLayer);
     if (isNum(o.nextLayerId)) nextLayerId = +o.nextLayerId;
