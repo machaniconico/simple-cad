@@ -607,6 +607,24 @@ await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dImg);
 const imR = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'image'));
 check('画像が保存読込で復元される', !!imR && imR.w === 50, JSON.stringify(imR && imR.w));
 
+// --- Z: 正多角形ツール ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 };
+  window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.state.style.sides = 6;
+  window.SimpleCAD.setTool('polygon');
+});
+// 中心(120,120)から半径方向へドラッグ
+await drawDrag(page, { x: 0, y: 51 }, 120 * 2, 120 * 2, 170 * 2, 120 * 2);
+const hex = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'polyline' && s.closed));
+check('正多角形が6頂点の閉ポリラインで作図', hex && hex.points.length === 6 && hex.closed, JSON.stringify(hex && hex.points.length));
+// 辺数を変えて作図
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.state.style.sides = 3; window.SimpleCAD.setTool('polygon'); });
+await drawDrag(page, { x: 0, y: 51 }, 120 * 2, 120 * 2, 160 * 2, 120 * 2);
+const tri = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'polyline' && s.closed));
+check('辺数3で三角形になる', tri && tri.points.length === 3, JSON.stringify(tri && tri.points.length));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

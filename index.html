@@ -196,6 +196,7 @@
       <button class="tool" data-tool="circle" title="円">◯<span class="lbl">円</span></button>
       <button class="tool" data-tool="ellipse" title="楕円">⬭<span class="lbl">楕円</span></button>
       <button class="tool" data-tool="polyline" title="ポリライン">⏚<span class="lbl">連線</span></button>
+      <button class="tool" data-tool="polygon" title="正多角形">⬡<span class="lbl">多角</span></button>
       <button class="tool" data-tool="text" title="文字">A<span class="lbl">文字</span></button>
       <button class="tool" data-tool="dim" title="寸法線">↔<span class="lbl">寸法</span></button>
       <button class="tool" data-tool="erase" title="削除">⌫<span class="lbl">削除</span></button>
@@ -210,6 +211,7 @@
         <label>塗り <span><input type="checkbox" id="pFillOn"> <input type="color" id="pFill" value="#1e3a5f"></span></label>
         <label>線幅 <input type="range" id="pWidth" min="1" max="10" step="0.5" value="2"><span id="pWidthVal" style="width:22px;text-align:right">2</span></label>
         <label>字高 <input type="number" id="pFont" min="1" step="1" value="16"> mm</label>
+        <label>辺数 <input type="number" id="pSides" min="3" max="60" step="1" value="6"></label>
         <hr style="border-color:var(--line)">
         <label class="chk"><input type="checkbox" id="cGrid" checked> グリッド</label>
         <label class="chk"><input type="checkbox" id="cSnap" checked> グリッド吸着</label>
@@ -304,7 +306,7 @@ const state = {
   view: { scale: 2, offsetX: 0, offsetY: 0 }, // 1mm = scale px
   tool: 'select',
   selection: new Set(),                // 選択中のid
-  style: { stroke: '#38bdf8', strokeWidth: 2, fill: null, fontSize: 16 },
+  style: { stroke: '#38bdf8', strokeWidth: 2, fill: null, fontSize: 16, sides: 6 },
   grid: { show: true, snap: true, osnap: true, step: 10 },
   layers: [{ id: 'L1', name: 'レイヤー1', visible: true, locked: false }],
   activeLayer: 'L1',
@@ -709,6 +711,18 @@ function drawHandles(s) {
   ctx.restore();
 }
 
+// 正多角形の頂点(world)。aim=最初の頂点の方向(既定は上)
+function polygonPoints(cx, cy, r, sides, aim) {
+  const n = Math.min(60, Math.max(3, sides | 0));
+  const a0 = aim == null ? -Math.PI / 2 : aim;
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = a0 + i * 2 * Math.PI / n;
+    pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  }
+  return pts;
+}
+
 function drawDraft() {
   const s = draft;
   applyStyle(state.style);
@@ -731,6 +745,13 @@ function drawDraft() {
   } else if (s.type === 'ellipse') {
     ctx.ellipse(W2Sx(s.cx), W2Sy(s.cy), s.rx * state.view.scale, s.ry * state.view.scale, 0, 0, Math.PI * 2); ctx.stroke();
     label = (s.rx * 2).toFixed(1) + ' × ' + (s.ry * 2).toFixed(1) + ' mm';
+    showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
+  } else if (s.type === 'polygon') {
+    const pts = polygonPoints(s.cx, s.cy, s.r, s.sides, s.aim);
+    ctx.moveTo(W2Sx(pts[0].x), W2Sy(pts[0].y));
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(W2Sx(pts[i].x), W2Sy(pts[i].y));
+    ctx.closePath(); ctx.stroke();
+    label = s.sides + '角形 r' + s.r.toFixed(1);
     showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
   }
   ctx.setLineDash([]);
@@ -1158,6 +1179,7 @@ function onToolDown(p) {
   else if (t === 'rect') { draft = { type: 'rect', x: w.x, y: w.y, w: 0, h: 0, _ox: w.x, _oy: w.y }; }
   else if (t === 'circle') { draft = { type: 'circle', cx: w.x, cy: w.y, r: 0 }; }
   else if (t === 'ellipse') { draft = { type: 'ellipse', cx: w.x, cy: w.y, rx: 0, ry: 0, _ox: w.x, _oy: w.y }; }
+  else if (t === 'polygon') { draft = { type: 'polygon', cx: w.x, cy: w.y, r: 0, sides: state.style.sides }; }
   else if (t === 'polyline') { handlePolyTap(w); }
   else if (t === 'text') { openTextEditor(w, null); }
   draw();
@@ -1269,6 +1291,9 @@ function onToolMove(p) {
     if (shiftHeld) { const m = Math.max(Math.abs(ex - draft._ox), Math.abs(ey - draft._oy)); ex = draft._ox + Math.sign(ex - draft._ox || 1) * m; ey = draft._oy + Math.sign(ey - draft._oy || 1) * m; }
     draft.cx = (draft._ox + ex) / 2; draft.cy = (draft._oy + ey) / 2;
     draft.rx = Math.abs(ex - draft._ox) / 2; draft.ry = Math.abs(ey - draft._oy) / 2;
+  } else if (draft.type === 'polygon') {
+    draft.r = Math.hypot(w.x - draft.cx, w.y - draft.cy);
+    draft.aim = Math.atan2(w.y - draft.cy, w.x - draft.cx); // ドラッグ方向に頂点を向ける
   }
   draw();
 }
@@ -1311,6 +1336,10 @@ function onToolUp(p) {
   } else if (s.type === 'ellipse') {
     if (s.rx < 0.01 || s.ry < 0.01) { draw(); return; }
     state.shapes.push({ id: uid(), type: 'ellipse', cx: s.cx, cy: s.cy, rx: s.rx, ry: s.ry, ...sty() });
+  } else if (s.type === 'polygon') {
+    if (s.r < 0.01) { draw(); return; }
+    const pts = polygonPoints(s.cx, s.cy, s.r, s.sides, s.aim);
+    state.shapes.push({ id: uid(), type: 'polyline', points: pts, closed: true, ...sty() });
   }
   pushHistory(); draw();
 }
@@ -1406,6 +1435,8 @@ pFill.oninput = updFill; pFillOn.onchange = updFill;
 pWidth.oninput = () => { state.style.strokeWidth = parseFloat(pWidth.value); document.getElementById('pWidthVal').textContent = pWidth.value; };
 const pFont = document.getElementById('pFont');
 pFont.oninput = () => { const v = parseFloat(pFont.value); if (!isNaN(v) && v > 0) state.style.fontSize = v; };
+const pSides = document.getElementById('pSides');
+pSides.oninput = () => { const v = parseInt(pSides.value); if (!isNaN(v)) state.style.sides = Math.min(60, Math.max(3, v)); };
 
 document.getElementById('cGrid').onchange = e => { state.grid.show = e.target.checked; draw(); };
 document.getElementById('cSnap').onchange = e => { state.grid.snap = e.target.checked; };
@@ -1963,6 +1994,7 @@ function loadAutosave() {
       state.style.fill = st.fill == null ? null : safeColor(st.fill, null);
       if (isNum(st.strokeWidth)) state.style.strokeWidth = Math.max(0.1, +st.strokeWidth);
       if (isNum(st.fontSize)) state.style.fontSize = Math.max(1, +st.fontSize);
+      if (isNum(st.sides)) state.style.sides = Math.min(60, Math.max(3, st.sides | 0));
     }
     return true;
   } catch (e) { return false; }
@@ -1978,6 +2010,7 @@ function syncPrefsUI() {
   document.getElementById('pWidth').value = state.style.strokeWidth;
   document.getElementById('pWidthVal').textContent = String(state.style.strokeWidth);
   document.getElementById('pFont').value = String(state.style.fontSize);
+  document.getElementById('pSides').value = String(state.style.sides);
   document.getElementById('pFillOn').checked = state.style.fill != null;
   if (state.style.fill != null) document.getElementById('pFill').value = state.style.fill;
 }
