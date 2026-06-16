@@ -946,6 +946,28 @@ await page.evaluate(() => {
 const rdim = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'dim'));
 check('半径寸法(dim)が中心→端で作成される', rdim && rdim.x1 === 50 && rdim.x2 === 75 && rdim.y1 === rdim.y2, JSON.stringify(rdim && { x1: rdim.x1, x2: rdim.x2 }));
 
+// --- AS: ロック保護の穴(Cut/複製)修正 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'lc', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('lc'); window.SimpleCAD.lockAPI.toggle(); // ロック
+  window.SimpleCAD.select('lc'); window.SimpleCAD.editAPI.cut(); // 切り取り試行
+});
+check('Cutでロック図形は削除されない', await page.evaluate(() => window.SimpleCAD.shapeCount()) === 1);
+// 複製するとロックは解除される(編集可能)
+await page.evaluate(() => { window.SimpleCAD.select('lc'); window.SimpleCAD.editAPI.duplicate(); });
+const dupLocked = await page.evaluate(() => { const ss = window.SimpleCAD.state.shapes; return { orig: !!ss[0].locked, dup: !!ss[1].locked, n: ss.length }; });
+check('複製はロックを引き継がない', dupLocked.n === 2 && dupLocked.orig === true && dupLocked.dup === false, JSON.stringify(dupLocked));
+// 回転楕円の半径寸法は端点が回転に追従
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 're', type: 'ellipse', cx: 0, cy: 0, rx: 40, ry: 20, rot: Math.PI / 2, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('re');
+  document.querySelector('#numProps button').click();
+});
+const rdim2 = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'dim'));
+check('回転楕円の半径寸法が回転追従(端点が縦方向)', rdim2 && Math.abs(rdim2.x2 - 0) < 0.01 && Math.abs(Math.abs(rdim2.y2) - 40) < 0.01, JSON.stringify(rdim2 && { x2: rdim2.x2, y2: rdim2.y2 }));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
