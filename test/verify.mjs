@@ -1353,6 +1353,36 @@ const precRes = await page.evaluate(() => {
 check('小数桁0で寸法ラベルが整数表示', precRes.has0, JSON.stringify(precRes));
 check('小数桁2で寸法ラベルが2桁表示', precRes.has2, JSON.stringify(precRes));
 
+// --- BY: DXF弧(0→90°)の向き・スパンが正しい(回帰固定。a0=-e,a1=-sでspan90°) ---
+const dxfArcChk = await page.evaluate(() => {
+  const dxf = ['0', 'SECTION', '2', 'ENTITIES', '0', 'ARC', '8', '0', '10', '0', '20', '0', '40', '10', '50', '0', '51', '90', '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const a = window.SimpleCAD.parseDXF(dxf)[0];
+  if (!a || a.type !== 'arc') return null;
+  let span = a.a1 - a.a0; if (span < 0) span += 2 * Math.PI;
+  const mid = a.a0 + span / 2;
+  return { spanDeg: span * 180 / Math.PI, mx: a.cx + a.r * Math.cos(mid), my: a.cy + a.r * Math.sin(mid) };
+});
+check('DXF弧(0→90°)は90°スパン・正しい象限で取り込み', dxfArcChk && Math.abs(dxfArcChk.spanDeg - 90) < 1 && Math.abs(dxfArcChk.mx - 7.07) < 0.3 && Math.abs(dxfArcChk.my + 7.07) < 0.3, JSON.stringify(dxfArcChk));
+
+// --- BZ: 回転rectの角の実world位置に端点スナップ(回転の二重適用が無いことを固定) ---
+const rotSnap = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.grid.osnap = true; window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.addShape({ id: 'rr', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#000', strokeWidth: 1, fill: null });
+  window.SimpleCAD.state.shapes[0].rot = Math.PI / 2; // 中心(5,5)まわり90°: 角(0,0)→world(10,0)
+  const v = window.SimpleCAD.state.view;
+  return window.SimpleCAD.resolvePoint(10 * v.scale + v.offsetX + 2, 0 * v.scale + v.offsetY + 2);
+});
+check('回転rectの角(world)に端点スナップ', Math.abs(rotSnap.x - 10) < 0.6 && Math.abs(rotSnap.y - 0) < 0.6, JSON.stringify(rotSnap));
+
+// --- CA: SVG/DXFのfont-size=0は16へ化けない(0はsanitizeで1へ) ---
+const fs0 = await page.evaluate(() => {
+  const svg = window.SimpleCAD.parseSVG('<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="0" font-size="0">a</text></svg>')[0];
+  const dxf = window.SimpleCAD.parseDXF(['0', 'SECTION', '2', 'ENTITIES', '0', 'TEXT', '8', '0', '10', '0', '20', '0', '40', '0', '1', 'a', '0', 'ENDSEC', '0', 'EOF'].join('\n'))[0];
+  return { svgFs: svg ? svg.fontSize : null, dxfFs: dxf ? dxf.fontSize : null };
+});
+check('font-size=0は16に化けない(SVG/DXF取込)', fs0.svgFs === 0 && fs0.dxfFs === 0, JSON.stringify(fs0));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

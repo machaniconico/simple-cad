@@ -2762,7 +2762,7 @@ function dxfToShape(type, c) {
     return { type: 'arc', cx: nf(10), cy: -nf(20), r: nf(40), a0: -e * Math.PI / 180, a1: -s * Math.PI / 180, stroke: '#000', fill: null };
   }
   if (type === 'TEXT' || type === 'MTEXT') {
-    const h = nf(40, 0, 16) || 16;
+    const h = nf(40, 0, 16); // nfが欠落時16を返す。明示的な0も尊重(|| 16だと0が16化する)
     const txt = ((c[1] || []).join('') || (c[3] || []).join('')).replace(/\\P|\\[A-Za-z][^;]*;|[{}]/g, ''); // MTEXT制御コード除去
     const just = parseInt(g(72) || '0', 10) || 0;
     return { type: 'text', x: nf(10), y: -nf(20) - h, fontSize: h, text: txt, align: just === 1 ? 'center' : just === 2 ? 'right' : 'left', stroke: '#000' };
@@ -2896,7 +2896,7 @@ function parseSVG(text) {
     else if (tag === 'ellipse') shapes.push({ ...base, type: 'ellipse', cx: nf(el, 'cx'), cy: nf(el, 'cy'), rx: nf(el, 'rx'), ry: nf(el, 'ry'), fill: fillOf(el) });
     else if (tag === 'polyline' || tag === 'polygon') { const pts = parsePoints(el.getAttribute('points')); if (pts.length >= 2) shapes.push({ ...base, type: 'polyline', points: pts, closed: tag === 'polygon', fill: tag === 'polygon' ? fillOf(el) : null }); }
     else if (tag === 'text') {
-      const fs = parseFloat(el.getAttribute('font-size')) || 16;
+      const fsRaw = parseFloat(el.getAttribute('font-size')); const fs = Number.isFinite(fsRaw) ? fsRaw : 16; // 0を16化しない
       const spans = el.getElementsByTagName('tspan');
       const txt = spans.length ? Array.from(spans).map(s => s.textContent).join('\n') : (el.textContent || '');
       const anchor = el.getAttribute('text-anchor');
