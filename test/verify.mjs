@@ -435,6 +435,42 @@ await page.mouse.move(c1.x + 40, c1.y + 20, { steps: 3 }); await page.mouse.move
 const moved = await page.evaluate(() => window.SimpleCAD.state.shapes.find(x => x.id === 'm2').cx !== 160);
 check('複数選択をまとめて移動できる', moved, 'm2移動=' + moved);
 
+// --- R: コピペ/複製/微動/全選択 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.grid = Object.assign(window.SimpleCAD.state.grid, { snap: true, step: 10 });
+  window.SimpleCAD.addShape({ id: 'e1', type: 'rect', x: 0, y: 0, w: 40, h: 30, stroke: '#fff', strokeWidth: 2, fill: null });
+});
+// 複製: 1個→2個、複製はオフセットされる
+await page.evaluate(() => { window.SimpleCAD.select('e1'); window.SimpleCAD.editAPI.duplicate(); });
+let cnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('複製で図形が2個になる', cnt === 2, 'count=' + cnt);
+const dup = await page.evaluate(() => { const ss = window.SimpleCAD.state.shapes; return { x0: ss[0].x, x1: ss[1].x, selDup: window.SimpleCAD.state.selection.has(ss[1].id) }; });
+check('複製はオフセットされ新図形が選択される', dup.x1 === dup.x0 + 10 && dup.selDup, JSON.stringify(dup));
+// コピー&ペースト
+await page.evaluate(() => { window.SimpleCAD.select(window.SimpleCAD.state.shapes[0].id); window.SimpleCAD.editAPI.copy(); window.SimpleCAD.editAPI.paste(); });
+cnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('コピー&ペーストで3個になる', cnt === 3, 'count=' + cnt);
+// 矢印移動(grid step=10)
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.addShape({ id: 'n1', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null }); window.SimpleCAD.select('n1'); });
+const nx0 = await page.evaluate(() => window.SimpleCAD.state.shapes[0].x);
+await page.evaluate(() => window.SimpleCAD.editAPI.nudge(10, 0));
+const nx1 = await page.evaluate(() => window.SimpleCAD.state.shapes[0].x);
+check('微動で+10移動しUndo可能', nx1 === nx0 + 10, `x ${nx0}->${nx1}`);
+await page.evaluate(() => window.SimpleCAD.undo());
+const nx2 = await page.evaluate(() => window.SimpleCAD.state.shapes[0].x);
+check('微動をUndoで戻せる', nx2 === nx0, 'x=' + nx2);
+// 矢印キー(実キー)でも動く
+await page.evaluate(() => window.SimpleCAD.select('n1'));
+await page.mouse.move(box.x + 5, box.y + 5); // フォーカスをbodyへ
+await page.keyboard.press('ArrowRight');
+const nx3 = await page.evaluate(() => window.SimpleCAD.state.shapes[0].x);
+check('ArrowRightキーで移動する', nx3 > nx0, 'x=' + nx3);
+// 全選択
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.addShape({ id: 'a1', type: 'rect', x: 0, y: 0, w: 5, h: 5, stroke: '#fff', strokeWidth: 1, fill: null }); window.SimpleCAD.addShape({ id: 'a2', type: 'circle', cx: 50, cy: 50, r: 10, stroke: '#fff', strokeWidth: 1, fill: null }); window.SimpleCAD.editAPI.selectAll(); });
+const allSel = await page.evaluate(() => window.SimpleCAD.state.selection.size);
+check('全選択で全図形が選択される', allSel === 2, 'sel=' + allSel);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

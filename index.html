@@ -1411,6 +1411,60 @@ document.getElementById('btnSvg').onclick = exportSVG;
 document.getElementById('btnPng').onclick = exportPNG;
 document.getElementById('btnPdf').onclick = exportPDF;
 
+// ===== クリップボード / 複製 / 微動 / 全選択 =====
+let clipboard = [];
+function selectedShapesList() {
+  return [...state.selection].map(id => state.shapes.find(s => s.id === id)).filter(Boolean);
+}
+function copySelection() {
+  const list = selectedShapesList();
+  if (list.length) clipboard = list.map(s => JSON.parse(JSON.stringify(s)));
+}
+function cutSelection() {
+  const list = selectedShapesList();
+  if (!list.length) return;
+  clipboard = list.map(s => JSON.parse(JSON.stringify(s)));
+  state.shapes = state.shapes.filter(s => !state.selection.has(s.id));
+  state.selection.clear(); pushHistory(); draw();
+}
+function pasteClipboard() {
+  if (!clipboard.length) return;
+  const off = state.grid.step || 10;
+  state.selection.clear();
+  for (const c of clipboard) {
+    const ns = JSON.parse(JSON.stringify(c));
+    ns.id = uid();
+    if (!getLayer(ns.layer)) ns.layer = state.activeLayer;
+    translateShape(ns, off, off);
+    state.shapes.push(ns); state.selection.add(ns.id);
+  }
+  pushHistory(); draw();
+}
+function duplicateSelection() {
+  const list = selectedShapesList();
+  if (!list.length) return;
+  const off = state.grid.step || 10;
+  state.selection.clear();
+  for (const s of list) {
+    const ns = JSON.parse(JSON.stringify(s));
+    ns.id = uid();
+    translateShape(ns, off, off);
+    state.shapes.push(ns); state.selection.add(ns.id);
+  }
+  pushHistory(); draw();
+}
+function nudgeSelection(dx, dy) {
+  const list = selectedShapesList();
+  if (!list.length) return;
+  for (const s of list) translateShape(s, dx, dy);
+  pushHistory(); draw();
+}
+function selectAll() {
+  state.selection.clear();
+  for (const s of state.shapes) if (isVisible(s) && !isLocked(s)) state.selection.add(s.id);
+  draw();
+}
+
 // キーボード
 window.addEventListener('keydown', e => {
   // 入力欄編集中はキャンバス用ショートカットを無効化
@@ -1419,6 +1473,21 @@ window.addEventListener('keydown', e => {
   if (e.key === ' ') spaceDown = true;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 'c') { e.preventDefault(); copySelection(); }
+  if (mod && e.key.toLowerCase() === 'x') { e.preventDefault(); cutSelection(); }
+  if (mod && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteClipboard(); }
+  if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelection(); }
+  if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); }
+  // 矢印キーで選択図形を移動(Shiftで10倍)
+  if (state.selection.size && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+    e.preventDefault();
+    let step = state.grid.snap ? state.grid.step : 1;
+    if (e.shiftKey) step *= 10;
+    const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+    const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+    nudgeSelection(dx, dy);
+  }
   if ((e.key === 'Delete' || e.key === 'Backspace') && state.selection.size) {
     e.preventDefault();
     state.shapes = state.shapes.filter(s => !state.selection.has(s.id));
@@ -1677,6 +1746,8 @@ window.SimpleCAD = {
   commitPoly,
   addShape: (sh) => { if (!sh.layer) sh.layer = state.activeLayer; state.shapes.push(sh); pushHistory(); draw(); },
   select: (id) => { state.selection.clear(); if (id) state.selection.add(id); draw(); },
+  selectMany: (ids) => { state.selection.clear(); (ids || []).forEach(i => state.selection.add(i)); draw(); },
+  editAPI: { copy: copySelection, cut: cutSelection, paste: pasteClipboard, duplicate: duplicateSelection, nudge: nudgeSelection, selectAll },
   layerAPI: { add: addLayer, del: deleteLayer, moveSel: moveSelectionToActive, render: renderLayers, toggle: toggleLayers, ensure: ensureLayers },
   transformAPI: { handleGeom, scaleShapeAbout, shapeExtent, shapeCenter },
   loadJSON: (o) => { state.shapes = sanitizeShapes(o.shapes); const v = safeView(o.view); if (v) state.view = v; const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls; if (o.activeLayer) state.activeLayer = String(o.activeLayer); ensureLayers(); resetHistory(); draw(); },
