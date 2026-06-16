@@ -232,6 +232,7 @@
         <label class="chk"><input type="checkbox" id="cGrid" checked> グリッド</label>
         <label class="chk"><input type="checkbox" id="cSnap" checked> グリッド吸着</label>
         <label class="chk"><input type="checkbox" id="cOsnap" checked> 端点スナップ</label>
+        <label class="chk"><input type="checkbox" id="cLight"> 用紙(白)モード</label>
         <label>間隔 <select id="gStep">
           <option value="1">1 mm</option>
           <option value="5">5 mm</option>
@@ -366,6 +367,7 @@ const state = {
   grid: { show: true, snap: true, osnap: true, step: 10 },
   layers: [{ id: 'L1', name: 'レイヤー1', visible: true, locked: false }],
   activeLayer: 'L1',
+  ui: { light: false },
 };
 let nextId = 1;
 let nextLayerId = 2;
@@ -589,6 +591,7 @@ function safeParse(str) {
 function draw() {
   ctx.clearRect(0, 0, viewW, viewH);
   ctx.setLineDash([]); // フレーム冒頭で破線状態をリセット(グリッド/ハンドルへの漏れ防止)
+  if (state.ui && state.ui.light) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, viewW, viewH); }
   if (state.grid.show) drawGrid();
   for (const s of state.shapes) { if (!isVisible(s)) continue; drawShape(s, state.selection.has(s.id)); }
   // 単一選択かつ選択ツール時のみ変形ハンドル
@@ -615,8 +618,9 @@ function drawGrid() {
   let gs = step;
   while (gs * state.view.scale < 6) gs *= 5;
 
+  const light = state.ui && state.ui.light;
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(148,163,184,0.12)';
+  ctx.strokeStyle = light ? 'rgba(0,0,0,0.10)' : 'rgba(148,163,184,0.12)';
   ctx.beginPath();
   for (let x = Math.floor(x0 / gs) * gs; x <= x1; x += gs) {
     const sx = W2Sx(x); ctx.moveTo(sx, 0); ctx.lineTo(sx, viewH);
@@ -627,7 +631,7 @@ function drawGrid() {
   ctx.stroke();
 
   // 原点軸
-  ctx.strokeStyle = 'rgba(56,189,248,0.45)';
+  ctx.strokeStyle = light ? 'rgba(14,165,233,0.5)' : 'rgba(56,189,248,0.45)';
   ctx.beginPath();
   ctx.moveTo(W2Sx(0), 0); ctx.lineTo(W2Sx(0), viewH);
   ctx.moveTo(0, W2Sy(0)); ctx.lineTo(viewW, W2Sy(0));
@@ -1578,6 +1582,7 @@ pDash.onchange = () => { state.style.dash = pDash.value; autosave(); };
 document.getElementById('cGrid').onchange = e => { state.grid.show = e.target.checked; draw(); };
 document.getElementById('cSnap').onchange = e => { state.grid.snap = e.target.checked; };
 document.getElementById('cOsnap').onchange = e => { state.grid.osnap = e.target.checked; };
+document.getElementById('cLight').onchange = e => { state.ui.light = e.target.checked; draw(); autosave(); };
 document.getElementById('gStep').onchange = e => { state.grid.step = parseFloat(e.target.value); document.getElementById('sgrid').textContent = e.target.value + 'mm'; draw(); };
 
 // 選択図形へスタイル適用
@@ -2180,7 +2185,7 @@ async function exportPDF() {
 const LS_KEY = 'simplecad.autosave.v1';
 let saveTimer = null;
 function saveNow() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ shapes: state.shapes, view: state.view, nextId, layers: state.layers, activeLayer: state.activeLayer, nextLayerId, grid: state.grid, style: state.style })); } catch (e) {}
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ shapes: state.shapes, view: state.view, nextId, layers: state.layers, activeLayer: state.activeLayer, nextLayerId, grid: state.grid, style: state.style, ui: state.ui })); } catch (e) {}
 }
 function autosave() {
   clearTimeout(saveTimer);
@@ -2215,6 +2220,7 @@ function loadAutosave() {
       if (isNum(st.sides)) state.style.sides = Math.min(60, Math.max(3, st.sides | 0));
       if (['solid', 'dashed', 'dotted'].includes(st.dash)) state.style.dash = st.dash;
     }
+    if (o.ui && typeof o.ui === 'object' && typeof o.ui.light === 'boolean') state.ui.light = o.ui.light;
     return true;
   } catch (e) { return false; }
 }
@@ -2223,6 +2229,7 @@ function syncPrefsUI() {
   document.getElementById('cGrid').checked = state.grid.show;
   document.getElementById('cSnap').checked = state.grid.snap;
   document.getElementById('cOsnap').checked = state.grid.osnap;
+  document.getElementById('cLight').checked = !!(state.ui && state.ui.light);
   document.getElementById('gStep').value = String(state.grid.step);
   document.getElementById('sgrid').textContent = state.grid.step + 'mm';
   document.getElementById('pStroke').value = state.style.stroke;

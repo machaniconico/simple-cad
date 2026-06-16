@@ -772,6 +772,24 @@ check('DXFにNaNが無い', !dxf.includes('NaN'), '');
 // 円のCIRCLEコード(10/20/40)が含まれる
 check('DXF CIRCLEに半径(40 20)', /CIRCLE[\s\S]*?\b40\b\r?\n20/.test(dxf) || dxf.includes('CIRCLE'), '');
 
+// --- AJ: 用紙(白)モード ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); document.getElementById('cLight').click(); });
+const isLight = await page.evaluate(() => window.SimpleCAD.state.ui.light);
+check('用紙モードON', isLight === true, 'light=' + isLight);
+// 白モードでは左上ピクセルが白(背景塗り)
+const px = await page.evaluate(() => {
+  const cv = document.getElementById('cv'); const c = cv.getContext('2d');
+  window.SimpleCAD.draw();
+  const d = c.getImageData(2, 2, 1, 1).data; return [d[0], d[1], d[2]];
+});
+check('白モードで背景が白', px[0] > 240 && px[1] > 240 && px[2] > 240, JSON.stringify(px));
+// 設定が永続化される
+await page.evaluate(() => window.SimpleCAD.saveNow());
+await page.reload();
+await page.waitForFunction(() => window.SimpleCAD, null, { timeout: 5000 });
+const lightRestored = await page.evaluate(() => ({ s: window.SimpleCAD.state.ui.light, ui: document.getElementById('cLight').checked }));
+check('用紙モードがリロードで復元', lightRestored.s === true && lightRestored.ui === true, JSON.stringify(lightRestored));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
