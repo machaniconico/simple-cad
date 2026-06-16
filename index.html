@@ -596,7 +596,7 @@ function snapToObjects(w) {
     else if (s.type === 'rect') { const c = [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]].map(([x, y]) => tw(x, y)); for (let i = 0; i < 4; i++) { const a = c[i], b = c[(i + 1) % 4]; segs.push([a.x, a.y, b.x, b.y]); } }
     else if (s.type === 'polyline') { const p = s.points.map(q => tw(q.x, q.y)); for (let i = 0; i < p.length - 1; i++) segs.push([p[i].x, p[i].y, p[i + 1].x, p[i + 1].y]); if (s.closed && p.length > 2) { const a = p[p.length - 1], b = p[0]; segs.push([a.x, a.y, b.x, b.y]); } }
     else if (s.type === 'angle') { const v = tw(s.vx, s.vy), p1 = tw(s.x1, s.y1), p2 = tw(s.x2, s.y2); segs.push([v.x, v.y, p1.x, p1.y], [v.x, v.y, p2.x, p2.y]); }
-    for (const sg of segs) if (distToSeg(w.x, w.y, sg[0], sg[1], sg[2], sg[3]) < thr * 3) near.push(sg);
+    for (const sg of segs) { if (near.length >= NEAR_CAP) break; if (distToSeg(w.x, w.y, sg[0], sg[1], sg[2], sg[3]) < thr * 3) near.push(sg); }
   }
   for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const p = segIntersect(near[i], near[j]); if (p) considerRaw(p.x, p.y); }
   return best;
@@ -2883,8 +2883,10 @@ function parseSVG(text) {
   const shapes = [];
   const nf = (el, a, d = 0) => { const v = parseFloat(el.getAttribute(a)); return Number.isFinite(v) ? v : d; };
   // 多層防御: 取り込み時点でも色を検証(後段のsanitizeShapeに加え、直接parseSVGを使う経路も保護)
-  const strokeOf = el => safeColor(el.getAttribute('stroke'), '#000');
   const fillOf = el => { const f = el.getAttribute('fill'); return (f && f !== 'none') ? safeColor(f, null) : null; };
+  // stroke="none"/無指定はアプリの「常に線を描く」モデルに無い。塗りがあれば塗り色(輪郭が目立たない)、無ければ既定で可視化。
+  // (applyStyleは strokeStyle='none' を無視し前の色が残るため、'none' を素通ししない)
+  const strokeOf = el => { const s = el.getAttribute('stroke'); if (s == null || s === '' || s === 'none') return fillOf(el) || '#000'; return safeColor(s, '#000'); };
   const rotOf = el => { let n = el; while (n && n.getAttribute) { const t = n.getAttribute('transform'); if (t) { const m = /rotate\(\s*(-?[\d.]+)/.exec(t); if (m) return parseFloat(m[1]) * Math.PI / 180; } n = n.parentNode; } return 0; };
   const parsePoints = str => { const nums = (str || '').trim().split(/[\s,]+/).map(Number); const pts = []; for (let i = 0; i + 1 < nums.length; i += 2) if (Number.isFinite(nums[i]) && Number.isFinite(nums[i + 1])) pts.push({ x: nums[i], y: nums[i + 1] }); return pts; };
   for (const el of root.querySelectorAll('line,rect,circle,ellipse,polyline,polygon,text,path')) {

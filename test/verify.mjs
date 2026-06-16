@@ -1383,6 +1383,13 @@ const fs0 = await page.evaluate(() => {
 });
 check('font-size=0は16に化けない(SVG/DXF取込)', fs0.svgFs === 0 && fs0.dxfFs === 0, JSON.stringify(fs0));
 
+// --- CB: SVG stroke="none"は塗り色へ矯正(意図しない輪郭混入を防ぐ) ---
+const noneStroke = await page.evaluate(() => {
+  const out = window.SimpleCAD.parseSVG('<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10" stroke="none" fill="#ff0000"/></svg>');
+  return out[0] ? { stroke: out[0].stroke, fill: out[0].fill } : null;
+});
+check('SVG stroke=noneは塗り色に矯正', noneStroke && noneStroke.stroke === '#ff0000', JSON.stringify(noneStroke));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
