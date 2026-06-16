@@ -89,9 +89,9 @@
   #props input[type=number] { width: 72px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; font-size: 12px; }
   #numProps .nptitle { color: var(--accent); margin: 6px 0 4px; }
   #numProps .npro { color: var(--muted); }
-  #alignBox .alrow { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
-  #alignBox button { flex: 1 1 auto; min-width: 30px; height: 30px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; cursor: pointer; }
-  #alignBox button:hover { background: #3f4d63; }
+  #alignBox .alrow, #orderBox .alrow { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
+  #alignBox button, #orderBox button { flex: 1 1 auto; min-width: 30px; height: 30px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 14px; cursor: pointer; }
+  #alignBox button:hover, #orderBox button:hover { background: #3f4d63; }
   .chk { display: inline-flex; align-items: center; gap: 4px; }
   #props .row2 { display: flex; gap: 6px; }
   #props .row2 button { flex: 1; }
@@ -238,7 +238,17 @@
             <button data-al="disty" title="縦に等間隔">⇳ 縦分布</button>
           </div>
         </div>
-        <div class="hint" id="hint">タップ/クリックで作図。2本指でピンチズーム＆パン。</div>
+        <div id="orderBox" style="display:none">
+          <hr style="border-color:var(--line)">
+          <div class="nptitle" style="color:var(--accent);margin:6px 0 4px">重ね順</div>
+          <div class="alrow">
+            <button data-z="front" title="最前面">⤒</button>
+            <button data-z="forward" title="前面へ">↥</button>
+            <button data-z="backward" title="背面へ">↧</button>
+            <button data-z="back" title="最背面">⤓</button>
+          </div>
+        </div>
+        <div class="hint" id="hint">タップ/クリックで作図。2本指でピンチズーム＆パン。Shiftで直交/正方形。</div>
       </div>
     </div>
 
@@ -521,6 +531,7 @@ function draw() {
   updateStatusCounts();
   updateNumPanel();
   updateAlignPanel();
+  updateOrderPanel();
 }
 
 function drawGrid() {
@@ -942,6 +953,7 @@ const pointers = new Map();   // id -> {x,y}
 let pinch = null;             // {dist, cx, cy} 2本指ジェスチャ
 let panning = false;          // 中ボタン/スペースパン
 let spaceDown = false;
+let shiftHeld = false;     // 直交拘束用のShift状態
 let downScreen = null;
 
 function getXY(e) {
@@ -1170,9 +1182,22 @@ function onToolMove(p) {
     return;
   }
   const w = resolvePoint(p.x, p.y);
-  if (draft.type === 'line' || draft.type === 'dim') { draft.x2 = w.x; draft.y2 = w.y; }
-  else if (draft.type === 'rect') { draft.x = Math.min(draft._ox, w.x); draft.y = Math.min(draft._oy, w.y); draft.w = Math.abs(w.x - draft._ox); draft.h = Math.abs(w.y - draft._oy); }
-  else if (draft.type === 'circle') { draft.r = Math.hypot(w.x - draft.cx, w.y - draft.cy); }
+  if (draft.type === 'line' || draft.type === 'dim') {
+    let ex = w.x, ey = w.y;
+    if (shiftHeld) { // 0/45/90度に拘束
+      const dx = ex - draft.x1, dy = ey - draft.y1, len = Math.hypot(dx, dy);
+      const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+      ex = draft.x1 + len * Math.cos(a); ey = draft.y1 + len * Math.sin(a);
+    }
+    draft.x2 = ex; draft.y2 = ey;
+  } else if (draft.type === 'rect') {
+    let ex = w.x, ey = w.y;
+    if (shiftHeld) { // 正方形に拘束
+      const sx = ex - draft._ox, sy = ey - draft._oy, m = Math.max(Math.abs(sx), Math.abs(sy));
+      ex = draft._ox + Math.sign(sx || 1) * m; ey = draft._oy + Math.sign(sy || 1) * m;
+    }
+    draft.x = Math.min(draft._ox, ex); draft.y = Math.min(draft._oy, ey); draft.w = Math.abs(ex - draft._ox); draft.h = Math.abs(ey - draft._oy);
+  } else if (draft.type === 'circle') { draft.r = Math.hypot(w.x - draft.cx, w.y - draft.cy); }
   draw();
 }
 
@@ -1526,6 +1551,34 @@ const alignBox = document.getElementById('alignBox');
 function updateAlignPanel() {
   alignBox.style.display = (state.tool === 'select' && state.selection.size >= 2) ? 'block' : 'none';
 }
+// ===== 重ね順(z-order) =====
+function reorderSelection(mode) {
+  const sel = state.selection;
+  if (!sel.size) return;
+  const arr = state.shapes;
+  if (mode === 'front') {
+    const keep = arr.filter(s => !sel.has(s.id)), move = arr.filter(s => sel.has(s.id));
+    state.shapes = [...keep, ...move];
+  } else if (mode === 'back') {
+    const keep = arr.filter(s => !sel.has(s.id)), move = arr.filter(s => sel.has(s.id));
+    state.shapes = [...move, ...keep];
+  } else if (mode === 'forward') {
+    for (let i = arr.length - 2; i >= 0; i--) {
+      if (sel.has(arr[i].id) && !sel.has(arr[i + 1].id)) { [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]; }
+    }
+  } else if (mode === 'backward') {
+    for (let i = 1; i < arr.length; i++) {
+      if (sel.has(arr[i].id) && !sel.has(arr[i - 1].id)) { [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]]; }
+    }
+  }
+  pushHistory(); draw();
+}
+const orderBox = document.getElementById('orderBox');
+function updateOrderPanel() {
+  orderBox.style.display = (state.tool === 'select' && state.selection.size >= 1) ? 'block' : 'none';
+}
+orderBox.querySelectorAll('button[data-z]').forEach(btn => { btn.onclick = () => reorderSelection(btn.dataset.z); });
+
 alignBox.querySelectorAll('button[data-al]').forEach(btn => {
   btn.onclick = () => {
     const m = btn.dataset.al;
@@ -1538,6 +1591,7 @@ alignBox.querySelectorAll('button[data-al]').forEach(btn => {
 // キーボード
 window.addEventListener('keydown', e => {
   // 入力欄編集中はキャンバス用ショートカットを無効化
+  if (e.key === 'Shift') shiftHeld = true;
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (e.key === ' ') spaceDown = true;
@@ -1566,7 +1620,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Enter' && polyPts) commitPoly(false);
   if (e.key === 'Escape') { draft = null; if (polyPts) { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
 });
-window.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; });
+window.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; if (e.key === 'Shift') shiftHeld = false; });
 
 // =========================================================================
 // ビュー / ユーティリティ
@@ -1819,6 +1873,7 @@ window.SimpleCAD = {
   selectMany: (ids) => { state.selection.clear(); (ids || []).forEach(i => state.selection.add(i)); draw(); },
   editAPI: { copy: copySelection, cut: cutSelection, paste: pasteClipboard, duplicate: duplicateSelection, nudge: nudgeSelection, selectAll },
   alignAPI: { align: alignSelection, distribute: distributeSelection },
+  orderAPI: { reorder: reorderSelection },
   layerAPI: { add: addLayer, del: deleteLayer, moveSel: moveSelectionToActive, render: renderLayers, toggle: toggleLayers, ensure: ensureLayers },
   transformAPI: { handleGeom, scaleShapeAbout, shapeExtent, shapeCenter },
   loadJSON: (o) => { state.shapes = sanitizeShapes(o.shapes); const v = safeView(o.view); if (v) state.view = v; const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls; if (o.activeLayer) state.activeLayer = String(o.activeLayer); ensureLayers(); resetHistory(); draw(); },

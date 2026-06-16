@@ -499,6 +499,38 @@ await page.evaluate(() => {
 const cxs = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.x + s.w / 2).sort((a, b) => a - b));
 check('横分布で中心が等間隔になる', Math.abs((cxs[1] - cxs[0]) - (cxs[2] - cxs[1])) < 0.001, JSON.stringify(cxs));
 
+// --- T: 重ね順(z-order) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'z1', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'z2', type: 'rect', x: 5, y: 5, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'z3', type: 'rect', x: 10, y: 10, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+});
+const order0 = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.id).join(','));
+check('初期重ね順 z1,z2,z3', order0 === 'z1,z2,z3', order0);
+// z1を最前面へ
+await page.evaluate(() => { window.SimpleCAD.select('z1'); window.SimpleCAD.orderAPI.reorder('front'); });
+let order = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.id).join(','));
+check('最前面でz1が末尾(最前)に', order === 'z2,z3,z1', order);
+// z1を最背面へ
+await page.evaluate(() => { window.SimpleCAD.select('z1'); window.SimpleCAD.orderAPI.reorder('back'); });
+order = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.id).join(','));
+check('最背面でz1が先頭(最背)に', order === 'z1,z2,z3', order);
+// z1を前面へ1段
+await page.evaluate(() => { window.SimpleCAD.select('z1'); window.SimpleCAD.orderAPI.reorder('forward'); });
+order = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.id).join(','));
+check('前面へ1段でz2,z1,z3', order === 'z2,z1,z3', order);
+
+// --- U: Shift直交拘束で水平線 ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 }; window.SimpleCAD.state.grid.snap = false; window.SimpleCAD.setTool('line'); });
+const ls = toVp(60, 60), le = toVp(160, 75); // ほぼ水平だが少し斜め
+await page.keyboard.down('Shift');
+await page.mouse.move(ls.x, ls.y); await page.mouse.down();
+await page.mouse.move((ls.x + le.x) / 2, (ls.y + le.y) / 2, { steps: 3 }); await page.mouse.move(le.x, le.y, { steps: 3 }); await page.mouse.up();
+await page.keyboard.up('Shift');
+const line = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'line'));
+check('Shiftで水平線に拘束(y1≈y2)', line && Math.abs(line.y1 - line.y2) < 0.5, JSON.stringify(line && { y1: line.y1, y2: line.y2 }));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
