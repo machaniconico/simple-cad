@@ -1549,6 +1549,9 @@ function selectAll() {
   for (const s of state.shapes) if (isVisible(s) && !isLocked(s)) state.selection.add(s.id);
   draw();
 }
+// ツールをキーで切替
+function activateTool(t) { const b = document.querySelector(`.tool[data-tool="${t}"]`); if (b) b.click(); }
+const TOOL_KEYS = { v: 'select', l: 'line', r: 'rect', c: 'circle', o: 'ellipse', p: 'polyline', t: 'text', m: 'dim', e: 'erase' };
 // ===== 整列・分布 =====
 function alignSelection(mode) {
   const list = selectedShapesList(); if (list.length < 2) return;
@@ -1651,6 +1654,8 @@ window.addEventListener('keydown', e => {
     state.shapes = state.shapes.filter(s => !state.selection.has(s.id));
     state.selection.clear(); pushHistory(); draw();
   }
+  // ツール切替(単独キー)
+  if (!mod && !e.altKey && TOOL_KEYS[e.key.toLowerCase()]) { e.preventDefault(); activateTool(TOOL_KEYS[e.key.toLowerCase()]); }
   if (e.key === 'Enter' && polyPts) commitPoly(false);
   if (e.key === 'Escape') { draft = null; if (polyPts) { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
 });
@@ -1858,7 +1863,7 @@ let saveTimer = null;
 function autosave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify({ shapes: state.shapes, view: state.view, nextId, layers: state.layers, activeLayer: state.activeLayer, nextLayerId })); } catch (e) {}
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ shapes: state.shapes, view: state.view, nextId, layers: state.layers, activeLayer: state.activeLayer, nextLayerId, grid: state.grid, style: state.style })); } catch (e) {}
   }, 400);
 }
 function loadAutosave() {
@@ -1873,8 +1878,37 @@ function loadAutosave() {
     const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls;
     if (o.activeLayer) state.activeLayer = String(o.activeLayer);
     if (isNum(o.nextLayerId)) nextLayerId = +o.nextLayerId;
+    // 設定(グリッド/スタイル)の復元
+    if (o.grid && typeof o.grid === 'object') {
+      const g = o.grid;
+      if (typeof g.show === 'boolean') state.grid.show = g.show;
+      if (typeof g.snap === 'boolean') state.grid.snap = g.snap;
+      if (typeof g.osnap === 'boolean') state.grid.osnap = g.osnap;
+      if (isNum(g.step) && g.step > 0) state.grid.step = +g.step;
+    }
+    if (o.style && typeof o.style === 'object') {
+      const st = o.style;
+      state.style.stroke = safeColor(st.stroke, state.style.stroke);
+      state.style.fill = st.fill == null ? null : safeColor(st.fill, null);
+      if (isNum(st.strokeWidth)) state.style.strokeWidth = Math.max(0.1, +st.strokeWidth);
+      if (isNum(st.fontSize)) state.style.fontSize = Math.max(1, +st.fontSize);
+    }
     return true;
   } catch (e) { return false; }
+}
+// 復元した設定値をUIコントロールへ反映
+function syncPrefsUI() {
+  document.getElementById('cGrid').checked = state.grid.show;
+  document.getElementById('cSnap').checked = state.grid.snap;
+  document.getElementById('cOsnap').checked = state.grid.osnap;
+  document.getElementById('gStep').value = String(state.grid.step);
+  document.getElementById('sgrid').textContent = state.grid.step + 'mm';
+  document.getElementById('pStroke').value = state.style.stroke;
+  document.getElementById('pWidth').value = state.style.strokeWidth;
+  document.getElementById('pWidthVal').textContent = String(state.style.strokeWidth);
+  document.getElementById('pFont').value = String(state.style.fontSize);
+  document.getElementById('pFillOn').checked = state.style.fill != null;
+  if (state.style.fill != null) document.getElementById('pFill').value = state.style.fill;
 }
 
 // =========================================================================
@@ -1890,7 +1924,7 @@ function init() {
   ensureLayers();
   updateZoomLabel();
   resetHistory();
-  document.getElementById('sgrid').textContent = state.grid.step + 'mm';
+  syncPrefsUI();
   draw();
 }
 // デバッグ/テスト用API（自動テストから内部状態へアクセスするため公開。実害なし）

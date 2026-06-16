@@ -554,6 +554,35 @@ await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dE);
 const elR = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'ellipse'));
 check('楕円が保存読込で復元される', !!elR && Math.abs(elR.rx - 50) < 1, JSON.stringify(elR && elR.rx));
 
+// --- W: ツール切替ショートカット ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.setTool('select'); });
+await page.mouse.move(box.x + 400, box.y + 300); // フォーカスをbodyへ
+await page.keyboard.press('r');
+let tool = await page.evaluate(() => window.SimpleCAD.state.tool);
+check('キー r で矩形ツール', tool === 'rect', 'tool=' + tool);
+await page.keyboard.press('o');
+tool = await page.evaluate(() => window.SimpleCAD.state.tool);
+check('キー o で楕円ツール', tool === 'ellipse', 'tool=' + tool);
+await page.keyboard.press('v');
+tool = await page.evaluate(() => window.SimpleCAD.state.tool);
+check('キー v で選択ツール', tool === 'select', 'tool=' + tool);
+
+// --- X: 設定(グリッド/スタイル)の永続化 ---
+await page.evaluate(() => {
+  window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.state.grid.step = 50;
+  window.SimpleCAD.state.style.stroke = '#ff8800';
+  // autosaveを強制発火
+  window.SimpleCAD.addShape({ id: 'pf', type: 'rect', x: 0, y: 0, w: 5, h: 5, stroke: '#fff', strokeWidth: 1, fill: null });
+});
+await page.waitForTimeout(500); // autosave debounce
+await page.reload();
+await page.waitForFunction(() => window.SimpleCAD, null, { timeout: 5000 });
+const prefs = await page.evaluate(() => ({ snap: window.SimpleCAD.state.grid.snap, step: window.SimpleCAD.state.grid.step, stroke: window.SimpleCAD.state.style.stroke, uiStep: document.getElementById('gStep').value, uiStroke: document.getElementById('pStroke').value }));
+check('リロードでグリッド設定が復元', prefs.snap === false && prefs.step === 50, JSON.stringify(prefs));
+check('リロードで線色設定が復元', prefs.stroke === '#ff8800', 'stroke=' + prefs.stroke);
+check('復元した設定がUIにも反映', prefs.uiStep === '50' && prefs.uiStroke === '#ff8800', JSON.stringify({ uiStep: prefs.uiStep, uiStroke: prefs.uiStroke }));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
