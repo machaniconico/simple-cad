@@ -369,6 +369,7 @@
     <span>倍率 <b id="szoom">100%</b></span>
     <span>グリッド <b id="sgrid">10mm</b></span>
     <span>図形 <b id="scount">0</b></span>
+    <span>選択 <b id="ssel">0</b></span>
   </div>
 </div>
 
@@ -871,7 +872,9 @@ function drawDraft() {
   let label = '';
   if (s.type === 'line' || s.type === 'dim') {
     ctx.moveTo(W2Sx(s.x1), W2Sy(s.y1)); ctx.lineTo(W2Sx(s.x2), W2Sy(s.y2)); ctx.stroke();
-    label = Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(1) + ' mm';
+    // 角度は数学系(上が負)を画面系(上が正)へ反転して表示
+    const deg = (-Math.atan2(s.y2 - s.y1, s.x2 - s.x1) * 180 / Math.PI + 360) % 360;
+    label = Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(1) + ' mm ∠' + deg.toFixed(0) + '°';
     showMeasure((W2Sx(s.x1) + W2Sx(s.x2)) / 2, (W2Sy(s.y1) + W2Sy(s.y2)) / 2, label);
   } else if (s.type === 'rect') {
     const x = W2Sx(s.x), y = W2Sy(s.y);
@@ -2127,6 +2130,7 @@ function updateZoomLabel() {
 }
 function updateStatusCounts() {
   document.getElementById('scount').textContent = state.shapes.length;
+  document.getElementById('ssel').textContent = state.selection.size;
 }
 
 function downloadBlob(blob, name) {

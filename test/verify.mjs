@@ -968,6 +968,15 @@ await page.evaluate(() => {
 const rdim2 = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'dim'));
 check('回転楕円の半径寸法が回転追従(端点が縦方向)', rdim2 && Math.abs(rdim2.x2 - 0) < 0.01 && Math.abs(Math.abs(rdim2.y2) - 40) < 0.01, JSON.stringify(rdim2 && { x2: rdim2.x2, y2: rdim2.y2 }));
 
+// --- AT: ステータス選択数 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'c1', type: 'rect', x: 0, y: 0, w: 5, h: 5, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'c2', type: 'rect', x: 10, y: 0, w: 5, h: 5, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.selectMany(['c1', 'c2']);
+});
+check('ステータスに選択数2が表示', await page.evaluate(() => document.getElementById('ssel').textContent) === '2');
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
