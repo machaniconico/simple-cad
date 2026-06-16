@@ -1027,6 +1027,30 @@ await page.evaluate(() => window.SimpleCAD.clearAll());
 await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dA);
 check('円弧が保存読込で復元', await page.evaluate(() => !!window.SimpleCAD.state.shapes.find(s => s.type === 'arc')));
 
+// --- AX: 円弧の掃引方向(a1<a0は長い側)・弧長・回転SVG ---
+// a0=80°, a1=20° → ctx.arcは300°(長い側)を描く。サンプル点数も300°相当で多いはず
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  const d = Math.PI / 180;
+  window.SimpleCAD.addShape({ id: 'ax', type: 'arc', cx: 0, cy: 0, r: 10, a0: 80 * d, a1: 20 * d, stroke: '#000', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('ax');
+});
+const arcInfo = await page.evaluate(() => document.getElementById('npInfo')?.textContent || '');
+// 300°の弧長 = 10 * (300*π/180) ≈ 52.4
+check('a1<a0の弧長が長い側(≈52)で計算', /5[0-9]\./.test(arcInfo) || arcInfo.includes('52'), arcInfo);
+// SVGのpolyline点数が多い(>30点 ≈ 300°/(π/32))
+const svgAx = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+const ptsCount = await page.evaluate(() => {
+  const svg = window.SimpleCAD.buildSVGString();
+  const m = svg.match(/points="([^"]*)"/);
+  return m ? m[1].trim().split(/\s+/).length : 0;
+});
+check('a1<a0でSVGサンプル点が長い側相当(>30)', ptsCount > 30, 'pts=' + ptsCount);
+// 回転arc: SVGに二重回転(g transform)が付かない
+await page.evaluate(() => { window.SimpleCAD.state.shapes[0].rot = Math.PI / 6; window.SimpleCAD.draw(); });
+const svgRot = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('回転arcはSVGで<g transform>を使わない(二重回転防止)', !svgRot.includes('<g transform'), svgRot.slice(0, 60));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

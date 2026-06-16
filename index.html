@@ -991,7 +991,7 @@ function measureInfo(s) {
   if (s.type === 'rect') return '面積 ' + f1(Math.abs(s.w * s.h)) + ' mm² / 周 ' + f1(2 * (Math.abs(s.w) + Math.abs(s.h))) + ' mm';
   if (s.type === 'circle') return '面積 ' + f1(Math.PI * s.r * s.r) + ' mm² / 円周 ' + f1(2 * Math.PI * s.r) + ' mm';
   if (s.type === 'ellipse') return '面積 ' + f1(Math.PI * s.rx * s.ry) + ' mm²';
-  if (s.type === 'arc') { let sp = Math.abs(s.a1 - s.a0) % (2 * Math.PI); return '弧長 ' + f1(s.r * sp) + ' mm / r' + f1(s.r); }
+  if (s.type === 'arc') { let sp = s.a1 - s.a0; if (sp < 0) sp += 2 * Math.PI; return '弧長 ' + f1(s.r * sp) + ' mm / r' + f1(s.r); }
   if (s.type === 'polyline') {
     const p = s.points; let len = 0;
     for (let i = 0; i < p.length - 1; i++) len += Math.hypot(p[i + 1].x - p[i].x, p[i + 1].y - p[i].y);
@@ -1669,6 +1669,7 @@ function updateArcDraft(w) {
   else { arcDraft.a1 = Math.atan2(w.y - arcDraft.cy, w.x - arcDraft.cx); }
 }
 function drawArcDraft() {
+  if (!arcDraft) return;
   applyStyle(state.style);
   ctx.setLineDash([6, 4]);
   ctx.beginPath();
@@ -2238,9 +2239,9 @@ function buildSVGString() {
     const st = safeColor(s.stroke, '#000'), sw = (+s.strokeWidth || 1), fl = safeColor(s.fill, 'none');
     // 線種(寸法は常に実線)
     const da = (s.type !== 'dim' && s.dash === 'dashed') ? ' stroke-dasharray="5,3"' : (s.type !== 'dim' && s.dash === 'dotted') ? ' stroke-dasharray="0.6,2"' : '';
-    // 回転図形はグループに rotate transform を付与
+    // 回転図形はグループに rotate transform を付与(arcはサンプリング時に回転済みのため除外)
     let gOpen = '', gClose = '';
-    if (s.rot) {
+    if (s.rot && s.type !== 'arc') {
       const c = shapeCenter(s);
       gOpen = `<g transform="rotate(${(s.rot * 180 / Math.PI).toFixed(3)} ${esc(c.x - ox)} ${esc(c.y - oy)})">`;
       gClose = '</g>\n';
@@ -2295,14 +2296,15 @@ function exportPNG() {
 
 // 円弧を点列にサンプリング(SVG/DXF出力用。回転考慮)
 function arcSamplePoints(s) {
-  let span = s.a1 - s.a0;
-  // ctx.arc 既定(反時計回りfalse=時計回り描画)に合わせ、a1>=a0方向で増加
-  const seg = Math.max(2, Math.ceil(Math.abs(span) / (Math.PI / 32)));
+  // ctx.arc 既定(anticlockwise=false)は常に角度増加方向に掃引し、a1<a0なら2π加算で長い側を描く。これに一致させる
+  let span = s.a1 - s.a0; if (span < 0) span += 2 * Math.PI;
+  const seg = Math.max(2, Math.ceil(span / (Math.PI / 32)));
+  const c = s.rot ? shapeCenter(s) : null;
   const pts = [];
   for (let i = 0; i <= seg; i++) {
     const a = s.a0 + span * (i / seg);
     let x = s.cx + s.r * Math.cos(a), y = s.cy + s.r * Math.sin(a);
-    if (s.rot) { const r = rotatePt(x, y, s.cx, s.cy, s.rot); x = r.x; y = r.y; }
+    if (c) { const r = rotatePt(x, y, c.x, c.y, s.rot); x = r.x; y = r.y; }
     pts.push({ x, y });
   }
   return pts;
