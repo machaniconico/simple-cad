@@ -471,6 +471,34 @@ await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.addSha
 const allSel = await page.evaluate(() => window.SimpleCAD.state.selection.size);
 check('全選択で全図形が選択される', allSel === 2, 'sel=' + allSel);
 
+// --- S: 整列・分布 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'g1', type: 'rect', x: 0, y: 0, w: 20, h: 20, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'g2', type: 'rect', x: 100, y: 30, w: 20, h: 20, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'g3', type: 'rect', x: 300, y: 60, w: 20, h: 20, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.editAPI.selectAll();
+});
+// 左揃え: 全部の x が最小(0)に
+await page.evaluate(() => window.SimpleCAD.alignAPI.align('left'));
+const lefts = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.x));
+check('左揃えで全図形のxが0に揃う', lefts.every(x => x === 0), JSON.stringify(lefts));
+// 上揃え: 全部の y が最小(0)に
+await page.evaluate(() => window.SimpleCAD.alignAPI.align('top'));
+const tops = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.y));
+check('上揃えで全図形のyが0に揃う', tops.every(y => y === 0), JSON.stringify(tops));
+// 横分布: 中心が等間隔になる(まず横位置を散らす)
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'd1', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'd2', type: 'rect', x: 20, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'd3', type: 'rect', x: 200, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.editAPI.selectAll();
+  window.SimpleCAD.alignAPI.distribute('x');
+});
+const cxs = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.x + s.w / 2).sort((a, b) => a - b));
+check('横分布で中心が等間隔になる', Math.abs((cxs[1] - cxs[0]) - (cxs[2] - cxs[1])) < 0.001, JSON.stringify(cxs));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

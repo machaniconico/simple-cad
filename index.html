@@ -83,6 +83,9 @@
   #props input[type=number] { width: 72px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; font-size: 12px; }
   #numProps .nptitle { color: var(--accent); margin: 6px 0 4px; }
   #numProps .npro { color: var(--muted); }
+  #alignBox .alrow { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
+  #alignBox button { flex: 1 1 auto; min-width: 30px; height: 30px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; cursor: pointer; }
+  #alignBox button:hover { background: #3f4d63; }
   .chk { display: inline-flex; align-items: center; gap: 4px; }
   #props .row2 { display: flex; gap: 6px; }
   #props .row2 button { flex: 1; }
@@ -213,6 +216,22 @@
           <button class="tbtn" id="btnApply" title="選択図形に適用">選択へ適用</button>
         </div>
         <div id="numProps"></div>
+        <div id="alignBox" style="display:none">
+          <hr style="border-color:var(--line)">
+          <div class="nptitle" style="color:var(--accent);margin:6px 0 4px">整列 (複数選択)</div>
+          <div class="alrow">
+            <button data-al="left" title="左揃え">⬅</button>
+            <button data-al="cx" title="左右中央">⬌</button>
+            <button data-al="right" title="右揃え">➡</button>
+            <button data-al="top" title="上揃え">⬆</button>
+            <button data-al="cy" title="上下中央">⬍</button>
+            <button data-al="bottom" title="下揃え">⬇</button>
+          </div>
+          <div class="alrow">
+            <button data-al="distx" title="横に等間隔">⇿ 横分布</button>
+            <button data-al="disty" title="縦に等間隔">⇳ 縦分布</button>
+          </div>
+        </div>
         <div class="hint" id="hint">タップ/クリックで作図。2本指でピンチズーム＆パン。</div>
       </div>
     </div>
@@ -495,6 +514,7 @@ function draw() {
   if (snapMarker) drawSnapMarker(snapMarker);
   updateStatusCounts();
   updateNumPanel();
+  updateAlignPanel();
 }
 
 function drawGrid() {
@@ -1464,6 +1484,50 @@ function selectAll() {
   for (const s of state.shapes) if (isVisible(s) && !isLocked(s)) state.selection.add(s.id);
   draw();
 }
+// ===== 整列・分布 =====
+function alignSelection(mode) {
+  const list = selectedShapesList(); if (list.length < 2) return;
+  const boxes = list.map(s => ({ s, b: shapeExtent(s) })).filter(o => o.b);
+  const minX = Math.min(...boxes.map(o => o.b.x)), maxX = Math.max(...boxes.map(o => o.b.x + o.b.w));
+  const minY = Math.min(...boxes.map(o => o.b.y)), maxY = Math.max(...boxes.map(o => o.b.y + o.b.h));
+  const cX = (minX + maxX) / 2, cY = (minY + maxY) / 2;
+  for (const { s, b } of boxes) {
+    let dx = 0, dy = 0;
+    if (mode === 'left') dx = minX - b.x;
+    else if (mode === 'right') dx = maxX - (b.x + b.w);
+    else if (mode === 'cx') dx = cX - (b.x + b.w / 2);
+    else if (mode === 'top') dy = minY - b.y;
+    else if (mode === 'bottom') dy = maxY - (b.y + b.h);
+    else if (mode === 'cy') dy = cY - (b.y + b.h / 2);
+    translateShape(s, dx, dy);
+  }
+  pushHistory(); draw();
+}
+function distributeSelection(axis) {
+  const list = selectedShapesList(); if (list.length < 3) { toast('分布は3個以上で'); return; }
+  const boxes = list.map(s => ({ s, b: shapeExtent(s) })).filter(o => o.b);
+  const cen = o => axis === 'x' ? o.b.x + o.b.w / 2 : o.b.y + o.b.h / 2;
+  boxes.sort((a, b) => cen(a) - cen(b));
+  const first = cen(boxes[0]), last = cen(boxes[boxes.length - 1]);
+  const stepc = (last - first) / (boxes.length - 1);
+  boxes.forEach((o, i) => {
+    const target = first + stepc * i, cur = cen(o);
+    translateShape(o.s, axis === 'x' ? target - cur : 0, axis === 'y' ? target - cur : 0);
+  });
+  pushHistory(); draw();
+}
+const alignBox = document.getElementById('alignBox');
+function updateAlignPanel() {
+  alignBox.style.display = (state.tool === 'select' && state.selection.size >= 2) ? 'block' : 'none';
+}
+alignBox.querySelectorAll('button[data-al]').forEach(btn => {
+  btn.onclick = () => {
+    const m = btn.dataset.al;
+    if (m === 'distx') distributeSelection('x');
+    else if (m === 'disty') distributeSelection('y');
+    else alignSelection(m);
+  };
+});
 
 // キーボード
 window.addEventListener('keydown', e => {
@@ -1748,6 +1812,7 @@ window.SimpleCAD = {
   select: (id) => { state.selection.clear(); if (id) state.selection.add(id); draw(); },
   selectMany: (ids) => { state.selection.clear(); (ids || []).forEach(i => state.selection.add(i)); draw(); },
   editAPI: { copy: copySelection, cut: cutSelection, paste: pasteClipboard, duplicate: duplicateSelection, nudge: nudgeSelection, selectAll },
+  alignAPI: { align: alignSelection, distribute: distributeSelection },
   layerAPI: { add: addLayer, del: deleteLayer, moveSel: moveSelectionToActive, render: renderLayers, toggle: toggleLayers, ensure: ensureLayers },
   transformAPI: { handleGeom, scaleShapeAbout, shapeExtent, shapeCenter },
   loadJSON: (o) => { state.shapes = sanitizeShapes(o.shapes); const v = safeView(o.view); if (v) state.view = v; const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls; if (o.activeLayer) state.activeLayer = String(o.activeLayer); ensureLayers(); resetHistory(); draw(); },
