@@ -815,6 +815,34 @@ check('列間隔20で x が 0,20,40 を含む', xs.includes(0) && xs.includes(20
 await page.evaluate(() => window.SimpleCAD.undo());
 check('配列をUndoで1個に戻す', (await page.evaluate(() => window.SimpleCAD.shapeCount())) === 1);
 
+// --- AL: グループ化 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 };
+  window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.setTool('select');
+  window.SimpleCAD.addShape({ id: 'gA', type: 'rect', x: 60, y: 60, w: 30, h: 20, stroke: '#fff', strokeWidth: 2, fill: null });
+  window.SimpleCAD.addShape({ id: 'gB', type: 'rect', x: 200, y: 60, w: 30, h: 20, stroke: '#fff', strokeWidth: 2, fill: null });
+  window.SimpleCAD.selectMany(['gA', 'gB']);
+  window.SimpleCAD.groupAPI.group();
+});
+const grouped = await page.evaluate(() => window.SimpleCAD.state.shapes.every(s => s.group) && window.SimpleCAD.state.shapes[0].group === window.SimpleCAD.state.shapes[1].group);
+check('2図形が同一グループになる', grouped, '');
+// gAの辺をクリック → グループ全体(2個)が選択される
+await page.evaluate(() => window.SimpleCAD.select(null));
+await page.mouse.click(0 + 60 * 2, 51 + 70 * 2); // gA左辺
+const selAfter = await page.evaluate(() => window.SimpleCAD.state.selection.size);
+check('グループ内クリックで全体選択', selAfter === 2, 'sel=' + selAfter);
+// グループ解除
+await page.evaluate(() => { window.SimpleCAD.selectMany(['gA', 'gB']); window.SimpleCAD.groupAPI.ungroup(); });
+const ungrouped = await page.evaluate(() => window.SimpleCAD.state.shapes.every(s => !s.group));
+check('グループ解除でgroupが消える', ungrouped, '');
+// 解除後はgAクリックで1個のみ
+await page.evaluate(() => window.SimpleCAD.select(null));
+await page.mouse.click(0 + 60 * 2, 51 + 70 * 2);
+const selSolo = await page.evaluate(() => window.SimpleCAD.state.selection.size);
+check('解除後は単体選択', selSolo === 1, 'sel=' + selSolo);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

@@ -267,6 +267,8 @@
             <button data-act="dup" title="複製 (Ctrl+D)">⧉ 複製</button>
             <button data-act="del" title="削除 (Delete)">🗑 削除</button>
             <button data-act="array" title="配列複製(行×列)">▦ 配列</button>
+            <button data-act="group" title="グループ化 (Ctrl+G)">⛶ 群化</button>
+            <button data-act="ungroup" title="グループ解除 (Ctrl+Shift+G)">⛶̷ 解除</button>
           </div>
         </div>
         <div id="orderBox" style="display:none">
@@ -386,6 +388,7 @@ const state = {
 };
 let nextId = 1;
 let nextLayerId = 2;
+let nextGroupId = 1;
 const uid = () => 's' + (nextId++);
 
 // ---- レイヤー ユーティリティ ----
@@ -419,7 +422,7 @@ let snapMarker = null;     // スナップ表示位置(world)
 
 // 履歴（lastSnapshot = 現在コミット済み状態。pushHistoryは「変更前」状態をundoへ積む）
 const history = { undo: [], redo: [] };
-function snapshot() { return JSON.stringify({ shapes: state.shapes, nextId, nextLayerId, layers: state.layers, activeLayer: state.activeLayer }); }
+function snapshot() { return JSON.stringify({ shapes: state.shapes, nextId, nextLayerId, nextGroupId, layers: state.layers, activeLayer: state.activeLayer }); }
 let lastSnapshot = '{"shapes":[],"nextId":1}';
 function resetHistory() {
   history.undo.length = 0; history.redo.length = 0;
@@ -438,6 +441,7 @@ function restore(str) {
   const o = JSON.parse(str);
   state.shapes = o.shapes; nextId = o.nextId;
   if (isNum(o.nextLayerId)) nextLayerId = o.nextLayerId;
+  if (isNum(o.nextGroupId)) nextGroupId = o.nextGroupId;
   if (o.layers) state.layers = o.layers;
   if (o.activeLayer) state.activeLayer = o.activeLayer;
   ensureLayers();
@@ -551,6 +555,7 @@ function sanitizeShape(s) {
     dash: ['solid', 'dashed', 'dotted'].includes(s.dash) ? s.dash : 'solid',
     rot: num(s.rot, 0),
   };
+  if (s.group != null) base.group = String(s.group).slice(0, 40);
   switch (s.type) {
     case 'line': case 'dim':
       return { ...base, type: s.type, x1: num(s.x1), y1: num(s.y1), x2: num(s.x2), y2: num(s.y2) };
@@ -1260,12 +1265,14 @@ function onToolDown(p) {
     const hit = hitTest(S2Wx(p.x), S2Wy(p.y));
     if (hit) {
       if (pointerShift) {
-        // Shiftクリックで選択トグル(移動は開始しない)
-        if (state.selection.has(hit.id)) state.selection.delete(hit.id);
-        else state.selection.add(hit.id);
+        // Shiftクリックで選択トグル(グループ単位、移動は開始しない)
+        const members = hit.group ? state.shapes.filter(x => x.group === hit.group).map(x => x.id) : [hit.id];
+        if (state.selection.has(hit.id)) members.forEach(i => state.selection.delete(i));
+        else members.forEach(i => state.selection.add(i));
         draw(); return;
       }
       if (!state.selection.has(hit.id)) { state.selection.clear(); state.selection.add(hit.id); }
+      expandSelectionToGroups();
       let duplicated = false;
       if (pointerAlt) {
         // Alt+ドラッグ: 選択を複製し、コピー側をドラッグ(原本は残す)
@@ -1450,6 +1457,7 @@ function onToolUp(p) {
         const b = shapeExtent(s); if (!b) continue;
         if (b.x < rx1 && b.x + b.w > rx0 && b.y < ry1 && b.y + b.h > ry0) state.selection.add(s.id);
       }
+      expandSelectionToGroups();
     }
     marquee = null; draw(); return;
   }
@@ -1815,6 +1823,27 @@ function selectAll() {
   for (const s of state.shapes) if (isVisible(s) && !isLocked(s)) state.selection.add(s.id);
   draw();
 }
+// ===== グループ化 =====
+// 選択にグループ所属図形があれば、同じグループの全図形を選択へ加える
+function expandSelectionToGroups() {
+  const groups = new Set();
+  for (const id of state.selection) { const s = state.shapes.find(x => x.id === id); if (s && s.group) groups.add(s.group); }
+  if (!groups.size) return;
+  for (const s of state.shapes) if (s.group && groups.has(s.group) && isVisible(s) && !isLocked(s)) state.selection.add(s.id);
+}
+function groupSelection() {
+  const list = selectedShapesList();
+  if (list.length < 2) { toast('2つ以上選択してください'); return; }
+  const gid = 'g' + (nextGroupId++);
+  for (const s of list) s.group = gid;
+  pushHistory(); draw();
+}
+function ungroupSelection() {
+  const list = selectedShapesList();
+  let changed = false;
+  for (const s of list) if (s.group) { delete s.group; changed = true; }
+  if (changed) { pushHistory(); draw(); }
+}
 // ツールをキーで切替
 function activateTool(t) { const b = document.querySelector(`.tool[data-tool="${t}"]`); if (b) b.click(); }
 const TOOL_KEYS = { v: 'select', l: 'line', r: 'rect', c: 'circle', o: 'ellipse', p: 'polyline', t: 'text', m: 'dim', e: 'erase' };
@@ -1910,7 +1939,7 @@ arrayDlg.addEventListener('click', e => { if (e.target === arrayDlg) arrayDlg.st
 
 const selActions = document.getElementById('selActions');
 selActions.querySelectorAll('button[data-act]').forEach(btn => {
-  btn.onclick = () => { const a = btn.dataset.act; if (a === 'dup') duplicateSelection(); else if (a === 'del') deleteSelection(); else if (a === 'array') openArrayDlg(); };
+  btn.onclick = () => { const a = btn.dataset.act; if (a === 'dup') duplicateSelection(); else if (a === 'del') deleteSelection(); else if (a === 'array') openArrayDlg(); else if (a === 'group') groupSelection(); else if (a === 'ungroup') ungroupSelection(); };
 });
 function updateSelActions() {
   selActions.style.display = (state.tool === 'select' && state.selection.size >= 1) ? 'block' : 'none';
@@ -1945,6 +1974,7 @@ window.addEventListener('keydown', e => {
   if (mod && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteClipboard(); }
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelection(); }
   if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); }
+  if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelection() : groupSelection(); }
   // 矢印キーで選択図形を移動(Shiftで10倍)
   if (state.selection.size && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
     e.preventDefault();
@@ -2318,6 +2348,7 @@ window.SimpleCAD = {
   editAPI: { copy: copySelection, cut: cutSelection, paste: pasteClipboard, duplicate: duplicateSelection, nudge: nudgeSelection, selectAll },
   alignAPI: { align: alignSelection, distribute: distributeSelection },
   orderAPI: { reorder: reorderSelection },
+  groupAPI: { group: groupSelection, ungroup: ungroupSelection },
   layerAPI: { add: addLayer, del: deleteLayer, moveSel: moveSelectionToActive, render: renderLayers, toggle: toggleLayers, ensure: ensureLayers },
   transformAPI: { handleGeom, scaleShapeAbout, shapeExtent, shapeCenter },
   loadJSON: (o) => { state.shapes = sanitizeShapes(o.shapes); const v = safeView(o.view); if (v) state.view = v; const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls; if (o.activeLayer) state.activeLayer = String(o.activeLayer); ensureLayers(); resetHistory(); draw(); },
