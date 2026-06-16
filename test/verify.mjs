@@ -722,6 +722,26 @@ const dashLeak = await page.evaluate(() => {
 });
 check('描画後にcanvasの破線状態がリセットされる', dashLeak === 0, 'lineDash=' + dashLeak);
 
+// --- AG: 選択時オンスクリーン操作(複製/削除) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.setTool('select');
+  window.SimpleCAD.addShape({ id: 'op', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+});
+let actVis = await page.evaluate(() => document.getElementById('selActions').style.display);
+check('非選択時は操作ボタン非表示', actVis === 'none', 'disp=' + actVis);
+await page.evaluate(() => window.SimpleCAD.select('op'));
+actVis = await page.evaluate(() => document.getElementById('selActions').style.display);
+check('選択時に操作ボタン表示', actVis === 'block', 'disp=' + actVis);
+// 複製ボタン
+await page.evaluate(() => document.querySelector('#selActions button[data-act=dup]').click());
+let actCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('複製ボタンで2個に', actCnt === 2, 'count=' + actCnt);
+// 削除ボタン(複製で選択された1個を削除)
+await page.evaluate(() => document.querySelector('#selActions button[data-act=del]').click());
+actCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('削除ボタンで選択を削除', actCnt === 1, 'count=' + actCnt);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

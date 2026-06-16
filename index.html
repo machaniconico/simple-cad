@@ -92,9 +92,10 @@
   #swatches button:hover { outline: 2px solid var(--accent); }
   #numProps .nptitle { color: var(--accent); margin: 6px 0 4px; }
   #numProps .npro { color: var(--muted); }
-  #alignBox .alrow, #orderBox .alrow { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
-  #alignBox button, #orderBox button { flex: 1 1 auto; min-width: 30px; height: 30px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 14px; cursor: pointer; }
-  #alignBox button:hover, #orderBox button:hover { background: #3f4d63; }
+  #alignBox .alrow, #orderBox .alrow, #selActions .alrow { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
+  #alignBox button, #orderBox button, #selActions button { flex: 1 1 auto; min-width: 30px; height: 32px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; cursor: pointer; }
+  #alignBox button:hover, #orderBox button:hover, #selActions button:hover { background: #3f4d63; }
+  #selActions button[data-act=del] { color: var(--danger); }
   .chk { display: inline-flex; align-items: center; gap: 4px; }
   #props .row2 { display: flex; gap: 6px; }
   #props .row2 button { flex: 1; }
@@ -255,6 +256,13 @@
           <div class="alrow">
             <button data-al="distx" title="横に等間隔">⇿ 横分布</button>
             <button data-al="disty" title="縦に等間隔">⇳ 縦分布</button>
+          </div>
+        </div>
+        <div id="selActions" style="display:none">
+          <hr style="border-color:var(--line)">
+          <div class="alrow">
+            <button data-act="dup" title="複製 (Ctrl+D)">⧉ 複製</button>
+            <button data-act="del" title="削除 (Delete)">🗑 削除</button>
           </div>
         </div>
         <div id="orderBox" style="display:none">
@@ -595,6 +603,7 @@ function draw() {
   updateNumPanel();
   updateAlignPanel();
   updateOrderPanel();
+  updateSelActions();
 }
 
 function drawGrid() {
@@ -1826,6 +1835,18 @@ function reorderSelection(mode) {
     }
   }
   pushHistory(); draw();
+}
+function deleteSelection() {
+  if (!state.selection.size) return;
+  state.shapes = state.shapes.filter(s => !state.selection.has(s.id));
+  state.selection.clear(); pushHistory(); draw();
+}
+const selActions = document.getElementById('selActions');
+selActions.querySelectorAll('button[data-act]').forEach(btn => {
+  btn.onclick = () => { if (btn.dataset.act === 'dup') duplicateSelection(); else deleteSelection(); };
+});
+function updateSelActions() {
+  selActions.style.display = (state.tool === 'select' && state.selection.size >= 1) ? 'block' : 'none';
 }
 const orderBox = document.getElementById('orderBox');
 function updateOrderPanel() {
