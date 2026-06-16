@@ -1,0 +1,8 @@
+node_modules/
+.omc/
+*.log
+.DS_Store
+drawing.pdf
+drawing.svg
+drawing.png
+drawing.json

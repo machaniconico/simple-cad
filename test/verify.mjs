@@ -1,0 +1,412 @@
+// SimpleCAD ヘッドレス検証スクリプト（Playwright/Chromium）
+// 実行: node test/verify.mjs
+import { chromium } from 'playwright';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { dirname, join } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const url = pathToFileURL(join(__dirname, '..', 'index.html')).href;
+
+let pass = 0, fail = 0;
+const results = [];
+function check(name, cond, detail = '') {
+  if (cond) { pass++; results.push(`  ✅ ${name}`); }
+  else { fail++; results.push(`  ❌ ${name}${detail ? ' — ' + detail : ''}`); }
+}
+
+// キャンバス上の (clientX,clientY) を rect 基準で渡してマウス作図
+async function drawDrag(page, box, x1, y1, x2, y2) {
+  await page.mouse.move(box.x + x1, box.y + y1);
+  await page.mouse.down();
+  await page.mouse.move(box.x + (x1 + x2) / 2, box.y + (y1 + y2) / 2);
+  await page.mouse.move(box.x + x2, box.y + y2);
+  await page.mouse.up();
+}
+
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+
+const consoleErrors = [];
+page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+page.on('pageerror', e => consoleErrors.push('pageerror: ' + e.message));
+page.on('dialog', d => d.accept()); // confirm()は承認
+
+await page.goto(url);
+await page.waitForFunction(() => window.SimpleCAD && typeof window.SimpleCAD.shapeCount === 'function', null, { timeout: 5000 });
+// 自動保存の復元を消してクリーン状態に
+await page.evaluate(() => window.SimpleCAD.clearAll());
+
+const canvas = await page.$('#cv');
+const box = await canvas.boundingBox();
+
+// --- A: ロード/初期化 ---
+check('ページがコンソールエラーなくロードされる', consoleErrors.length === 0, consoleErrors.join(' | '));
+check('window.SimpleCAD が公開されている', await page.evaluate(() => !!window.SimpleCAD));
+
+// --- B: 線分作図 ---
+await page.evaluate(() => window.SimpleCAD.setTool('line'));
+await drawDrag(page, box, 100, 100, 300, 200);
+let n = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('線分が1本作図される', n === 1, 'count=' + n);
+let t = await page.evaluate(() => window.SimpleCAD.state.shapes[0]?.type);
+check('図形タイプが line', t === 'line', 't=' + t);
+
+// --- C: 矩形・円 ---
+await page.evaluate(() => window.SimpleCAD.setTool('rect'));
+await drawDrag(page, box, 350, 150, 500, 300);
+await page.evaluate(() => window.SimpleCAD.setTool('circle'));
+await drawDrag(page, box, 600, 200, 680, 200);
+n = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('矩形・円を加えて計3図形', n === 3, 'count=' + n);
+const types = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.type));
+check('図形タイプ列が [line,rect,circle]', JSON.stringify(types) === '["line","rect","circle"]', JSON.stringify(types));
+
+// --- D: Undo/Redo ---
+await page.evaluate(() => window.SimpleCAD.undo());
+n = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('Undoで2図形に戻る', n === 2, 'count=' + n);
+await page.evaluate(() => window.SimpleCAD.redo());
+n = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('Redoで3図形に復帰', n === 3, 'count=' + n);
+
+// --- E: 選択して移動 ---
+await page.evaluate(() => window.SimpleCAD.setTool('select'));
+// 線分の中点付近をクリックして選択→ドラッグ移動
+const before = await page.evaluate(() => ({ ...window.SimpleCAD.state.shapes[0] }));
+await page.mouse.move(box.x + 200, box.y + 150);
+await page.mouse.down();
+await page.mouse.move(box.x + 240, box.y + 190);
+await page.mouse.move(box.x + 260, box.y + 210);
+await page.mouse.up();
+const after = await page.evaluate(() => ({ ...window.SimpleCAD.state.shapes[0] }));
+check('選択ツールで線分を移動できる', after.x1 !== before.x1 || after.y1 !== before.y1,
+  `before(${before.x1},${before.y1}) after(${after.x1},${after.y1})`);
+
+// --- F: 保存/読込ラウンドトリップ ---
+const dump = await page.evaluate(() => window.SimpleCAD.dumpJSON());
+await page.evaluate(() => window.SimpleCAD.clearAll());
+check('clearAllで0図形', (await page.evaluate(() => window.SimpleCAD.shapeCount())) === 0);
+await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dump);
+const restored = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('loadJSONで3図形を完全復元', restored === 3, 'count=' + restored);
+
+// --- G: SVG生成 ---
+const svg = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('SVGに<svgルート要素', svg.includes('<svg'));
+check('SVGに<line要素', svg.includes('<line'));
+check('SVGに<rect図形要素', (svg.match(/<rect/g) || []).length >= 2); // 背景+図形
+check('SVGに<circle要素', svg.includes('<circle'));
+check('SVG寸法がNaNでない', !svg.includes('NaN'), svg.slice(0, 120));
+
+// --- H: グリッド吸着 ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.state.grid.snap = true; window.SimpleCAD.state.grid.step = 10; });
+await page.evaluate(() => window.SimpleCAD.setTool('line'));
+await drawDrag(page, box, 123, 137, 287, 213);
+const ln = await page.evaluate(() => window.SimpleCAD.state.shapes[0]);
+const isMul = v => Math.abs(v / 10 - Math.round(v / 10)) < 1e-6;
+check('グリッド吸着で端点がグリッド上(始点)', ln && isMul(ln.x1) && isMul(ln.y1), JSON.stringify(ln));
+check('グリッド吸着で端点がグリッド上(終点)', ln && isMul(ln.x2) && isMul(ln.y2), JSON.stringify(ln));
+
+// --- I: ピンチズーム（合成タッチ pointer イベント） ---
+await page.evaluate(() => window.SimpleCAD.clearAll());
+const beforeScale = await page.evaluate(() => window.SimpleCAD.state.view.scale);
+await page.evaluate(() => {
+  const cv = document.getElementById('cv');
+  const r = cv.getBoundingClientRect();
+  const mk = (type, id, x, y) => cv.dispatchEvent(new PointerEvent(type, {
+    pointerId: id, pointerType: 'touch', clientX: r.left + x, clientY: r.top + y,
+    bubbles: true, cancelable: true, isPrimary: id === 1,
+  }));
+  // 2本指を中央付近から外側へ広げる→ズームイン
+  mk('pointerdown', 1, 400, 350); mk('pointerdown', 2, 500, 350);
+  for (let i = 1; i <= 5; i++) { mk('pointermove', 1, 400 - i * 20, 350); mk('pointermove', 2, 500 + i * 20, 350); }
+  mk('pointerup', 1, 300, 350); mk('pointerup', 2, 600, 350);
+});
+const afterScale = await page.evaluate(() => window.SimpleCAD.state.view.scale);
+check('2本指ピンチでズーム倍率が増加', afterScale > beforeScale, `before=${beforeScale} after=${afterScale}`);
+
+// --- J: ポリライン ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.setTool('polyline'); });
+await page.mouse.click(box.x + 100, box.y + 400);
+await page.mouse.click(box.x + 200, box.y + 450);
+await page.mouse.click(box.x + 300, box.y + 400);
+await page.evaluate(() => window.SimpleCAD.commitPoly(false));
+const poly = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'polyline'));
+check('ポリラインが3頂点で作図される', poly && poly.points.length === 3, JSON.stringify(poly?.points?.length));
+
+// --- K: 数値直接入力(G002) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 's1', type: 'rect', x: 0, y: 0, w: 50, h: 30, stroke: '#fff', strokeWidth: 2, fill: null });
+  window.SimpleCAD.select('s1');
+});
+const hasNumInputs = await page.evaluate(() => document.querySelectorAll('#numProps input[data-k]').length);
+check('単一選択で数値入力欄が生成される', hasNumInputs === 4, 'inputs=' + hasNumInputs);
+// 幅(w)を 50 -> 120 に変更
+await page.evaluate(() => {
+  const inp = [...document.querySelectorAll('#numProps input[data-k]')].find(i => i.dataset.k === 'w');
+  inp.value = '120';
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  inp.dispatchEvent(new Event('change', { bubbles: true }));
+});
+let wv = await page.evaluate(() => window.SimpleCAD.state.shapes[0].w);
+check('数値入力で幅が120に更新される', wv === 120, 'w=' + wv);
+// 編集はUndo可能
+await page.evaluate(() => window.SimpleCAD.undo());
+wv = await page.evaluate(() => window.SimpleCAD.state.shapes[0].w);
+check('数値編集をUndoで50に戻せる', wv === 50, 'w=' + wv);
+// 非選択時はパネルが空
+await page.evaluate(() => { window.SimpleCAD.state.selection.clear(); window.SimpleCAD.draw(); });
+const emptyPanel = await page.evaluate(() => document.querySelectorAll('#numProps input[data-k]').length);
+check('非選択時は数値入力欄が無い', emptyPanel === 0, 'inputs=' + emptyPanel);
+
+// --- L: レイヤー(G003) ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.layerAPI.ensure(); });
+// 既定で1レイヤー
+let lc = await page.evaluate(() => window.SimpleCAD.state.layers.length);
+check('既定レイヤーが1つ', lc === 1, 'layers=' + lc);
+// レイヤー追加→アクティブ切替
+await page.evaluate(() => window.SimpleCAD.layerAPI.add());
+lc = await page.evaluate(() => window.SimpleCAD.state.layers.length);
+const active2 = await page.evaluate(() => window.SimpleCAD.state.activeLayer);
+check('レイヤー追加で2つ・新規がアクティブ', lc === 2 && active2 === 'L2', `layers=${lc} active=${active2}`);
+// 新規図形は現アクティブレイヤーに割り当て
+await page.evaluate(() => window.SimpleCAD.setTool('rect'));
+await drawDrag(page, box, 120, 120, 220, 200);
+const shLayer = await page.evaluate(() => window.SimpleCAD.state.shapes[0].layer);
+check('新規図形がアクティブレイヤー(L2)に属する', shLayer === 'L2', 'layer=' + shLayer);
+// L2を非表示→SVGに図形が出ない
+await page.evaluate(() => { const l = window.SimpleCAD.state.layers.find(x => x.id === 'L2'); l.visible = false; window.SimpleCAD.draw(); });
+let svg2 = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('非表示レイヤーの図形はSVGに出ない', !svg2.includes('<rect x'), svg2.slice(0, 80));
+// 非表示レイヤーの図形はヒットしない(選択不可)
+await page.evaluate(() => { window.SimpleCAD.state.layers.find(x => x.id === 'L2').visible = true; window.SimpleCAD.state.layers.find(x => x.id === 'L2').locked = true; window.SimpleCAD.draw(); });
+const hit = await page.evaluate(() => { const s = window.SimpleCAD.state.shapes[0]; return !!window.SimpleCAD.hitTest(s.x + s.w / 2, s.y); });
+check('ロックレイヤーの図形は選択不可', hit === false, 'hit=' + hit);
+// 保存/読込でレイヤー復元
+const dump2 = await page.evaluate(() => window.SimpleCAD.dumpJSON());
+check('dumpにlayersが含まれる', Array.isArray(dump2.layers) && dump2.layers.length === 2);
+await page.evaluate(() => window.SimpleCAD.clearAll());
+await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dump2);
+const lc2 = await page.evaluate(() => window.SimpleCAD.state.layers.length);
+check('読込でレイヤーが復元される', lc2 === 2, 'layers=' + lc2);
+// レイヤー削除(図形ごと)
+await page.evaluate(() => window.SimpleCAD.layerAPI.del('L2'));
+const afterDel = await page.evaluate(() => ({ layers: window.SimpleCAD.state.layers.length, shapes: window.SimpleCAD.shapeCount() }));
+check('レイヤー削除で図形も消える', afterDel.layers === 1 && afterDel.shapes === 0, JSON.stringify(afterDel));
+
+// --- M: 文字入力(G004) ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.setTool('text'); });
+// テキストツールでキャンバスをクリック→オーバーレイ入力が開く
+await page.mouse.click(box.x + 200, box.y + 200);
+const overlayShown = await page.evaluate(() => document.getElementById('textInput').style.display);
+check('テキストツールで入力欄が開く', overlayShown === 'block', 'display=' + overlayShown);
+// 入力してEnterで確定
+await page.evaluate(() => {
+  const inp = document.getElementById('textInput');
+  inp.value = '寸法注記A';
+  inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+});
+const txt = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'text'));
+check('テキスト図形が作成される', txt && txt.text === '寸法注記A', JSON.stringify(txt && txt.text));
+check('テキストにfontSizeが設定される', txt && txt.fontSize > 0, 'fs=' + (txt && txt.fontSize));
+// 本文を数値パネルから編集
+await page.evaluate(() => window.SimpleCAD.select(window.SimpleCAD.state.shapes.find(s => s.type === 'text').id));
+const hasTextField = await page.evaluate(() => !!document.querySelector('#numProps input[data-ktext]'));
+check('単一選択でテキスト本文編集欄が出る', hasTextField);
+await page.evaluate(() => {
+  const inp = document.querySelector('#numProps input[data-ktext]');
+  inp.value = '修正後テキスト';
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  inp.dispatchEvent(new Event('change', { bubbles: true }));
+});
+const txt2 = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'text').text);
+check('パネルで本文を編集できる', txt2 === '修正後テキスト', txt2);
+// SVGにテキストが出る(エスケープ確認のため<を含めない通常文字)
+const svgT = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('SVGに<text>要素が出る', svgT.includes('<text') && svgT.includes('修正後テキスト'), svgT.slice(0, 120));
+// 保存/読込でテキスト復元
+const dT = await page.evaluate(() => window.SimpleCAD.dumpJSON());
+await page.evaluate(() => window.SimpleCAD.clearAll());
+await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dT);
+const txt3 = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'text')?.text);
+check('読込でテキストが復元される', txt3 === '修正後テキスト', txt3);
+
+// --- N: 変形ハンドル(G005) ---
+// スナップOFFで連続変形を検証
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.state.view = { scale: 2, offsetX: 50, offsetY: 50 }; // ビューを既知状態へ
+  window.SimpleCAD.setTool('select');
+  window.SimpleCAD.addShape({ id: 'r1', type: 'rect', x: 100, y: 100, w: 60, h: 40, stroke: '#fff', strokeWidth: 2, fill: null });
+  window.SimpleCAD.select('r1');
+});
+// scaleShapeAbout: (0,0)中心に2倍
+const sc = await page.evaluate(() => {
+  const s = { type: 'rect', x: 10, y: 10, w: 20, h: 20 };
+  window.SimpleCAD.transformAPI.scaleShapeAbout(s, 0, 0, 2, 2);
+  return s;
+});
+check('scaleShapeAboutで2倍拡大', sc.x === 20 && sc.w === 40, JSON.stringify(sc));
+// shapeExtentは回転で拡大する
+const ext = await page.evaluate(() => {
+  const s = { type: 'rect', x: 0, y: 0, w: 100, h: 0.0001, rot: Math.PI / 4 };
+  return window.SimpleCAD.transformAPI.shapeExtent(s);
+});
+check('回転で軸平行外接矩形が拡大', ext.w > 60 && ext.h > 60, JSON.stringify(ext));
+// 角ハンドルをドラッグしてリサイズ(右下corner idx2)
+const cornerVp = await page.evaluate(() => {
+  const s = window.SimpleCAD.state.shapes[0];
+  const hg = window.SimpleCAD.transformAPI.handleGeom(s);
+  const v = window.SimpleCAD.state.view;
+  const c = hg.corners[2]; // 右下
+  return { x: c.x * v.scale + v.offsetX, y: c.y * v.scale + v.offsetY };
+});
+await page.mouse.move(box.x + cornerVp.x, box.y + cornerVp.y);
+await page.mouse.down();
+await page.mouse.move(box.x + cornerVp.x + 60, box.y + cornerVp.y + 40);
+await page.mouse.move(box.x + cornerVp.x + 120, box.y + cornerVp.y + 80);
+await page.mouse.up();
+const resized = await page.evaluate(() => window.SimpleCAD.state.shapes[0]);
+check('角ハンドルのドラッグで拡大される', resized && resized.w > 60 && resized.h > 40, `w=${resized?.w} h=${resized?.h}`);
+// リサイズはUndo可能
+await page.evaluate(() => window.SimpleCAD.undo());
+const afterUndo = await page.evaluate(() => window.SimpleCAD.state.shapes[0]) || {};
+check('リサイズをUndoで元寸に戻せる', Math.abs(afterUndo.w - 60) < 0.001 && Math.abs(afterUndo.h - 40) < 0.001, `w=${afterUndo.w} h=${afterUndo.h}`);
+// 回転ハンドルをドラッグして回転
+await page.evaluate(() => window.SimpleCAD.select('r1'));
+const rotVp = await page.evaluate(() => {
+  const s = window.SimpleCAD.state.shapes[0];
+  const hg = window.SimpleCAD.transformAPI.handleGeom(s);
+  const v = window.SimpleCAD.state.view;
+  return { h: { x: hg.rotHandle.x * v.scale + v.offsetX, y: hg.rotHandle.y * v.scale + v.offsetY },
+           c: { x: hg.center.x * v.scale + v.offsetX, y: hg.center.y * v.scale + v.offsetY } };
+});
+await page.mouse.move(box.x + rotVp.h.x, box.y + rotVp.h.y);
+await page.mouse.down();
+// 中心の右側へ動かす→約90度回転
+await page.mouse.move(box.x + rotVp.c.x + 80, box.y + rotVp.c.y);
+await page.mouse.move(box.x + rotVp.c.x + 90, box.y + rotVp.c.y + 2);
+await page.mouse.up();
+const rotShape = await page.evaluate(() => window.SimpleCAD.state.shapes[0]);
+check('回転ハンドルのドラッグでrotが変化', Math.abs(rotShape.rot || 0) > 0.3, 'rot=' + rotShape.rot);
+// 回転図形のヒットテスト(ローカル座標化)
+const hitRot = await page.evaluate(() => {
+  const s = window.SimpleCAD.state.shapes[0];
+  // 図形中心は必ずヒットするはず(塗り無し矩形なので中心線上ではない→端でテスト)
+  const c = window.SimpleCAD.transformAPI.shapeCenter(s);
+  // 回転後の右下コーナー付近をヒット
+  const hg = window.SimpleCAD.transformAPI.handleGeom(s);
+  const corner = hg.corners[2];
+  return !!window.SimpleCAD.hitTest(corner.x, corner.y);
+});
+check('回転図形を回転後の位置で選択できる', hitRot === true, 'hit=' + hitRot);
+// 角度を数値パネルから設定
+await page.evaluate(() => { window.SimpleCAD.state.shapes[0].rot = 0; window.SimpleCAD.select('r1'); });
+await page.evaluate(() => {
+  const inp = document.querySelector('#numProps input[data-kdeg]');
+  inp.value = '30';
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  inp.dispatchEvent(new Event('change', { bubbles: true }));
+});
+const deg = await page.evaluate(() => (window.SimpleCAD.state.shapes[0].rot * 180 / Math.PI));
+check('角度欄で30度に設定できる', Math.abs(deg - 30) < 0.5, 'deg=' + deg);
+
+// --- O: PDF出力(G006) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.view = { scale: 2, offsetX: 50, offsetY: 50 };
+  window.SimpleCAD.addShape({ id: 'pr', type: 'rect', x: 0, y: 0, w: 100, h: 50, stroke: '#000', strokeWidth: 2, fill: null });
+  window.SimpleCAD.addShape({ id: 'pt', type: 'text', x: 10, y: 10, text: '日本語テキスト注記', fontSize: 8, stroke: '#000' });
+});
+const pdfInfo = await page.evaluate(async () => {
+  const blob = await window.SimpleCAD.buildPDFBlob();
+  if (!blob) return null;
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  const head = new TextDecoder('latin1').decode(buf.slice(0, 8));
+  const tail = new TextDecoder('latin1').decode(buf.slice(-8));
+  const full = new TextDecoder('latin1').decode(buf);
+  return { size: buf.length, head, tail, hasEOF: full.includes('%%EOF'), hasXref: full.includes('xref'), hasImage: full.includes('/Image'), hasFlate: full.includes('/FlateDecode'), type: blob.type };
+});
+check('PDF Blobが生成される', pdfInfo && pdfInfo.size > 1000, 'size=' + (pdfInfo && pdfInfo.size));
+check('PDFヘッダが%PDF', pdfInfo && pdfInfo.head.startsWith('%PDF-'), 'head=' + (pdfInfo && pdfInfo.head));
+check('PDFに%%EOFがある', pdfInfo && pdfInfo.hasEOF);
+check('PDFにxrefがある', pdfInfo && pdfInfo.hasXref);
+check('PDFに画像XObjectが埋め込まれる', pdfInfo && pdfInfo.hasImage);
+check('PDF MIMEがapplication/pdf', pdfInfo && pdfInfo.type === 'application/pdf');
+// ページサイズが実寸(110mm x 60mm 相当, padding込み)。100+10pad*2=110mm→311.8pt前後
+const mediaBox = await page.evaluate(async () => {
+  const blob = await window.SimpleCAD.buildPDFBlob();
+  const full = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+  const m = full.match(/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/);
+  return m ? { w: parseFloat(m[1]), h: parseFloat(m[2]) } : null;
+});
+const mm2pt = 72 / 25.4;
+check('PDFページ幅が実寸(110mm)', mediaBox && Math.abs(mediaBox.w - 110 * mm2pt) < 2, JSON.stringify(mediaBox));
+check('PDFページ高が実寸(60mm)', mediaBox && Math.abs(mediaBox.h - 60 * mm2pt) < 2, JSON.stringify(mediaBox));
+
+// --- P: 堅牢化(レビュー指摘の回帰) ---
+// 不正JSON(XSS試行/proto汚染/不正座標)を読み込んでも安全
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.loadJSON({
+    shapes: [
+      { type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#000"/><script>alert(1)</script><rect x="0', fill: 'none' },
+      { type: 'circle', cx: 'NaN', cy: 5, r: -3 },
+      { type: 'polyline' }, // points無し→除外
+      { type: 'unknown' },  // 未知型→除外
+      { type: 'text', x: 1, y: 1, text: '<b>&"危険"', fontSize: 0 },
+      { type: '__proto__', polluted: true },
+    ],
+  });
+});
+const sani = await page.evaluate(() => {
+  const ss = window.SimpleCAD.state.shapes;
+  return {
+    count: ss.length,
+    rectStroke: ss.find(s => s.type === 'rect')?.stroke,
+    circleR: ss.find(s => s.type === 'circle')?.r,
+    textFs: ss.find(s => s.type === 'text')?.fontSize,
+    proto: ({}).polluted,
+  };
+});
+check('不正な線色は安全な既定値に矯正される', sani.rectStroke === '#38bdf8', 'stroke=' + sani.rectStroke);
+check('負の半径は0以上に矯正', sani.circleR >= 0, 'r=' + sani.circleR);
+check('fontSize=0は最小値に矯正', sani.textFs >= 0.1, 'fs=' + sani.textFs);
+check('points無しpolyline/未知型/proto型は除外', sani.count === 3, 'count=' + sani.count);
+check('プロトタイプ汚染が起きない', sani.proto === undefined, 'polluted=' + sani.proto);
+// 汚染shapeを含んでもSVGにscriptタグが素通りしない
+const svgSafe = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('SVGに<script>が混入しない', !svgSafe.includes('<script'), svgSafe.slice(0, 100));
+// 壊れたviewは無視される
+await page.evaluate(() => window.SimpleCAD.loadJSON({ shapes: [{ type: 'rect', x: 0, y: 0, w: 5, h: 5 }], view: { scale: 0, offsetX: 'x', offsetY: NaN } }));
+const viewOk = await page.evaluate(() => { const v = window.SimpleCAD.state.view; return isFinite(v.scale) && v.scale > 0; });
+check('壊れたviewは無視され有効な倍率を保つ', viewOk === true);
+// 全図形が非表示レイヤーのときのエクスポートは安全に空
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'h1', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#000', strokeWidth: 1, fill: null });
+  window.SimpleCAD.state.layers[0].visible = false; window.SimpleCAD.draw();
+});
+const hiddenExport = await page.evaluate(async () => {
+  const svg = window.SimpleCAD.buildSVGString();
+  const pdf = await window.SimpleCAD.buildPDFBlob();
+  return { svg, pdf };
+});
+check('非表示のみ時SVGは空文字', hiddenExport.svg === '', 'len=' + hiddenExport.svg.length);
+check('非表示のみ時PDFはnull', hiddenExport.pdf === null);
+// nextLayerIdが履歴で巻き戻る
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.layerAPI.add(); window.SimpleCAD.layerAPI.add(); });
+const nlBefore = await page.evaluate(() => window.SimpleCAD.dumpJSON().layers.length);
+check('レイヤー2つ追加で計3', nlBefore === 3, 'layers=' + nlBefore);
+
+// 後始末
+check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
+
+await browser.close();
+
+console.log('\n==== SimpleCAD 検証結果 ====');
+console.log(results.join('\n'));
+console.log(`\n合計: ${pass} passed, ${fail} failed`);
+process.exit(fail === 0 ? 0 : 1);

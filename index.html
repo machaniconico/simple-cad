@@ -1,0 +1,1654 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1e293b">
+<!-- 防御層: 単一HTML/インラインscript構成を壊さず、object/base/form 等の悪用面のみ閉じる -->
+<meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>SimpleCAD — ブラウザ簡易CAD</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #334155;
+    --line: #475569;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent2: #0ea5e9;
+    --danger: #f87171;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    overscroll-behavior: none;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; width: 100%; }
+
+  /* ===== 上部ツールバー ===== */
+  #topbar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: calc(6px + var(--safe-top)) 8px 6px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  #topbar .title { font-weight: 700; font-size: 15px; color: var(--accent); margin-right: 4px; white-space: nowrap; }
+  .group { display: flex; gap: 4px; align-items: center; }
+  .sep { width: 1px; height: 24px; background: var(--line); margin: 0 2px; }
+  button.tbtn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; min-width: 44px; height: 38px; padding: 0 8px;
+    font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  button.tbtn:hover { background: #3f4d63; }
+  button.tbtn:active { transform: translateY(1px); }
+  button.tbtn:disabled { opacity: .4; cursor: default; }
+
+  /* ===== 本体 ===== */
+  #main { flex: 1 1 auto; position: relative; min-height: 0; }
+  #cv { display: block; width: 100%; height: 100%; touch-action: none; background: #0b1220; }
+
+  /* ===== 左ツールパレット ===== */
+  #tools {
+    position: absolute; top: 10px; left: 10px;
+    display: flex; flex-direction: column; gap: 6px;
+    background: rgba(30,41,59,.92); padding: 6px; border-radius: 12px; border: 1px solid var(--line);
+    backdrop-filter: blur(4px);
+  }
+  button.tool {
+    width: 48px; height: 48px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); font-size: 20px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+  }
+  button.tool .lbl { font-size: 9px; margin-top: 2px; color: var(--muted); }
+  button.tool.active { background: var(--accent2); border-color: var(--accent); color: #001; }
+  button.tool.active .lbl { color: #012; }
+
+  /* ===== 右プロパティパネル ===== */
+  #props {
+    position: absolute; top: 10px; right: 10px; width: 184px;
+    background: rgba(30,41,59,.94); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px; font-size: 12px; backdrop-filter: blur(4px);
+  }
+  #props h3 { margin: 0 0 8px; font-size: 12px; color: var(--accent); }
+  #props label { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0; }
+  #props input[type=range] { flex: 1; }
+  #props input[type=color] { width: 36px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
+  #props select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px; }
+  #props input[type=number] { width: 72px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; font-size: 12px; }
+  #numProps .nptitle { color: var(--accent); margin: 6px 0 4px; }
+  #numProps .npro { color: var(--muted); }
+  .chk { display: inline-flex; align-items: center; gap: 4px; }
+  #props .row2 { display: flex; gap: 6px; }
+  #props .row2 button { flex: 1; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.4; }
+  #props.collapsed .body { display: none; }
+  #propToggle { float: right; cursor: pointer; color: var(--muted); border: none; background: none; font-size: 14px; }
+
+  /* ポリライン確定ボタン */
+  #confirmBar {
+    position: absolute; bottom: 54px; left: 50%; transform: translateX(-50%);
+    display: none; gap: 8px;
+  }
+  #confirmBar.show { display: flex; }
+  #confirmBar button {
+    background: var(--accent2); color: #001; border: none; border-radius: 20px;
+    height: 40px; padding: 0 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  #confirmBar button.cancel { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+
+  /* ===== 下部ステータスバー ===== */
+  #status {
+    flex: 0 0 auto; display: flex; gap: 14px; align-items: center;
+    padding: 4px 10px calc(4px + var(--safe-bottom));
+    background: var(--panel); border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--muted); white-space: nowrap; overflow-x: auto;
+  }
+  #status b { color: var(--text); font-weight: 600; }
+
+  /* スマホ調整 */
+  @media (max-width: 560px) {
+    #props { width: 150px; padding: 8px; }
+    #topbar .title { display: none; }
+    button.tbtn { min-width: 40px; height: 36px; font-size: 12px; padding: 0 6px; }
+    button.tool { width: 44px; height: 44px; }
+  }
+  /* レイヤーパネル */
+  #layers {
+    position: absolute; bottom: 12px; left: 10px; width: 230px; max-height: 50%;
+    background: rgba(30,41,59,.96); border: 1px solid var(--line); border-radius: 12px;
+    display: flex; flex-direction: column; overflow: hidden; backdrop-filter: blur(4px); z-index: 20;
+  }
+  #layers .lhead { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--accent); }
+  #layers .lhead button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; margin-left: 2px; }
+  #layerList { overflow-y: auto; padding: 4px; }
+  .lrow { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 8px; font-size: 12px; }
+  .lrow.active { background: rgba(56,189,248,.18); }
+  .lrow button { background: none; border: none; cursor: pointer; font-size: 15px; width: 26px; height: 26px; border-radius: 6px; color: var(--text); }
+  .lrow button.off { opacity: .35; }
+  .lrow .lname { flex: 1; background: none; border: 1px solid transparent; color: var(--text); border-radius: 6px; padding: 3px 5px; font-size: 12px; min-width: 0; }
+  .lrow .lname:focus { border-color: var(--line); background: var(--panel2); outline: none; }
+  .lrow .ldot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); cursor: pointer; flex: 0 0 auto; }
+  .lrow.active .ldot { border-color: var(--accent); background: var(--accent); }
+  .toast {
+    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+    background: rgba(15,23,42,.95); border: 1px solid var(--accent); color: var(--text);
+    padding: 8px 16px; border-radius: 20px; font-size: 13px; pointer-events: none;
+    opacity: 0; transition: opacity .2s; z-index: 50;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- 上部バー -->
+  <div id="topbar">
+    <span class="title">📐 SimpleCAD</span>
+    <div class="group">
+      <button class="tbtn" id="btnUndo" title="元に戻す (Ctrl+Z)">↶</button>
+      <button class="tbtn" id="btnRedo" title="やり直し (Ctrl+Y)">↷</button>
+    </div>
+    <div class="sep"></div>
+    <div class="group">
+      <button class="tbtn" id="btnNew" title="全消去">🗑 New</button>
+      <button class="tbtn" id="btnFit" title="画面に合わせる">⤢ Fit</button>
+      <button class="tbtn" id="btnLayers" title="レイヤー">🗂 レイヤー</button>
+    </div>
+    <div class="sep"></div>
+    <div class="group">
+      <button class="tbtn" id="btnSave" title="JSON保存">💾 保存</button>
+      <button class="tbtn" id="btnLoad" title="JSON読込">📂 読込</button>
+      <button class="tbtn" id="btnSvg" title="SVG書き出し">SVG</button>
+      <button class="tbtn" id="btnPng" title="PNG書き出し">PNG</button>
+      <button class="tbtn" id="btnPdf" title="PDF書き出し(実寸)">PDF</button>
+    </div>
+    <input type="file" id="fileInput" accept="application/json,.json" style="display:none">
+  </div>
+
+  <!-- 本体 -->
+  <div id="main">
+    <canvas id="cv"></canvas>
+
+    <!-- テキスト入力オーバーレイ -->
+    <input id="textInput" type="text" placeholder="文字を入力" style="display:none; position:absolute; z-index:30; background:rgba(15,23,42,.95); color:#fff; border:1px solid var(--accent); border-radius:6px; padding:4px 6px; font-size:14px;">
+
+    <!-- ツールパレット -->
+    <div id="tools">
+      <button class="tool active" data-tool="select" title="選択/移動">🖱<span class="lbl">選択</span></button>
+      <button class="tool" data-tool="line" title="線分">／<span class="lbl">線</span></button>
+      <button class="tool" data-tool="rect" title="矩形">▭<span class="lbl">矩形</span></button>
+      <button class="tool" data-tool="circle" title="円">◯<span class="lbl">円</span></button>
+      <button class="tool" data-tool="polyline" title="ポリライン">⏚<span class="lbl">連線</span></button>
+      <button class="tool" data-tool="text" title="文字">A<span class="lbl">文字</span></button>
+      <button class="tool" data-tool="dim" title="寸法線">↔<span class="lbl">寸法</span></button>
+      <button class="tool" data-tool="erase" title="削除">⌫<span class="lbl">削除</span></button>
+    </div>
+
+    <!-- プロパティ -->
+    <div id="props">
+      <button id="propToggle" title="折りたたみ">▾</button>
+      <h3>プロパティ</h3>
+      <div class="body">
+        <label>線色 <input type="color" id="pStroke" value="#38bdf8"></label>
+        <label>塗り <span><input type="checkbox" id="pFillOn"> <input type="color" id="pFill" value="#1e3a5f"></span></label>
+        <label>線幅 <input type="range" id="pWidth" min="1" max="10" step="0.5" value="2"><span id="pWidthVal" style="width:22px;text-align:right">2</span></label>
+        <label>字高 <input type="number" id="pFont" min="1" step="1" value="16"> mm</label>
+        <hr style="border-color:var(--line)">
+        <label class="chk"><input type="checkbox" id="cGrid" checked> グリッド</label>
+        <label class="chk"><input type="checkbox" id="cSnap" checked> グリッド吸着</label>
+        <label class="chk"><input type="checkbox" id="cOsnap" checked> 端点スナップ</label>
+        <label>間隔 <select id="gStep">
+          <option value="1">1 mm</option>
+          <option value="5">5 mm</option>
+          <option value="10" selected>10 mm</option>
+          <option value="50">50 mm</option>
+          <option value="100">100 mm</option>
+        </select></label>
+        <div class="row2">
+          <button class="tbtn" id="btnApply" title="選択図形に適用">選択へ適用</button>
+        </div>
+        <div id="numProps"></div>
+        <div class="hint" id="hint">タップ/クリックで作図。2本指でピンチズーム＆パン。</div>
+      </div>
+    </div>
+
+    <!-- レイヤーパネル -->
+    <div id="layers" style="display:none">
+      <div class="lhead">
+        <span>レイヤー</span>
+        <span>
+          <button id="layerAdd" title="レイヤー追加">＋</button>
+          <button id="layerToSel" title="選択図形を現在レイヤーへ移動">⇲</button>
+          <button id="layerClose" title="閉じる">✕</button>
+        </span>
+      </div>
+      <div id="layerList"></div>
+    </div>
+
+    <!-- ポリライン確定 -->
+    <div id="confirmBar">
+      <button class="cancel" id="plCancel">キャンセル</button>
+      <button id="plDone">確定</button>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <!-- ステータス -->
+  <div id="status">
+    <span>X <b id="sx">0</b> mm</span>
+    <span>Y <b id="sy">0</b> mm</span>
+    <span>倍率 <b id="szoom">100%</b></span>
+    <span>グリッド <b id="sgrid">10mm</b></span>
+    <span>図形 <b id="scount">0</b></span>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+ * SimpleCAD — 単一ファイル・依存なしのブラウザ簡易2D CAD
+ *   座標系: ワールド座標(mm) と スクリーン座標(px) を分離。
+ *   screen = world * scale + offset
+ * ========================================================================= */
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+// ---- 状態 ----
+const state = {
+  shapes: [],                          // 図形配列
+  view: { scale: 2, offsetX: 0, offsetY: 0 }, // 1mm = scale px
+  tool: 'select',
+  selection: new Set(),                // 選択中のid
+  style: { stroke: '#38bdf8', strokeWidth: 2, fill: null, fontSize: 16 },
+  grid: { show: true, snap: true, osnap: true, step: 10 },
+  layers: [{ id: 'L1', name: 'レイヤー1', visible: true, locked: false }],
+  activeLayer: 'L1',
+};
+let nextId = 1;
+let nextLayerId = 2;
+const uid = () => 's' + (nextId++);
+
+// ---- レイヤー ユーティリティ ----
+function getLayer(id) { return state.layers.find(l => l.id === id) || null; }
+function layerOf(s) { return getLayer(s.layer) || state.layers[0]; }
+function isVisible(s) { const l = layerOf(s); return !l || l.visible; }
+function isLocked(s) { const l = layerOf(s); return l ? l.locked : false; }
+// データ整合性: レイヤーが空なら既定を作り、layer未指定の図形を割り当てる
+function ensureLayers() {
+  if (!state.layers || !state.layers.length) {
+    state.layers = [{ id: 'L1', name: 'レイヤー1', visible: true, locked: false }];
+    nextLayerId = 2;
+  }
+  if (!getLayer(state.activeLayer)) state.activeLayer = state.layers[0].id;
+  const ids = new Set(state.layers.map(l => l.id));
+  for (const s of state.shapes) if (!s.layer || !ids.has(s.layer)) s.layer = state.layers[0].id;
+  let mx = 1;
+  for (const l of state.layers) { const n = parseInt(String(l.id).replace('L', '')); if (n >= mx) mx = n + 1; }
+  if (nextLayerId < mx) nextLayerId = mx;
+}
+
+// 描画途中の一時状態
+let draft = null;          // 線/矩形/円/寸法の作図中データ
+let polyPts = null;        // ポリライン作図中の点列
+let dragMove = null;       // 選択移動中 {ids, startWorld, orig:Map}
+let handleDrag = null;     // 変形(リサイズ/回転)中
+let snapMarker = null;     // スナップ表示位置(world)
+
+// 履歴（lastSnapshot = 現在コミット済み状態。pushHistoryは「変更前」状態をundoへ積む）
+const history = { undo: [], redo: [] };
+function snapshot() { return JSON.stringify({ shapes: state.shapes, nextId, nextLayerId, layers: state.layers, activeLayer: state.activeLayer }); }
+let lastSnapshot = '{"shapes":[],"nextId":1}';
+function resetHistory() {
+  history.undo.length = 0; history.redo.length = 0;
+  lastSnapshot = snapshot();
+  updateUndoButtons();
+}
+function pushHistory() {
+  history.undo.push(lastSnapshot);          // 直前(変更前)の状態を退避
+  if (history.undo.length > 100) history.undo.shift();
+  history.redo.length = 0;
+  lastSnapshot = snapshot();                 // 現在を最新としてコミット
+  updateUndoButtons();
+  autosave();
+}
+function restore(str) {
+  const o = JSON.parse(str);
+  state.shapes = o.shapes; nextId = o.nextId;
+  if (isNum(o.nextLayerId)) nextLayerId = o.nextLayerId;
+  if (o.layers) state.layers = o.layers;
+  if (o.activeLayer) state.activeLayer = o.activeLayer;
+  ensureLayers();
+  state.selection.clear();
+  numBuiltFor = null; // 履歴ジャンプ後は数値パネルを必ず再構築
+  if (layersPanelOpen()) renderLayers();
+}
+function layersPanelOpen() { const el = document.getElementById('layers'); return el && el.style.display !== 'none'; }
+function undo() {
+  if (!history.undo.length) return;
+  history.redo.push(lastSnapshot);           // 現在をredoへ
+  const prev = history.undo.pop();
+  restore(prev); lastSnapshot = prev;
+  updateUndoButtons(); draw(); autosave();
+}
+function redo() {
+  if (!history.redo.length) return;
+  history.undo.push(lastSnapshot);
+  const next = history.redo.pop();
+  restore(next); lastSnapshot = next;
+  updateUndoButtons(); draw(); autosave();
+}
+function updateUndoButtons() {
+  document.getElementById('btnUndo').disabled = history.undo.length === 0;
+  document.getElementById('btnRedo').disabled = history.redo.length === 0;
+}
+
+// ---- 座標変換 ----
+const W2Sx = wx => wx * state.view.scale + state.view.offsetX;
+const W2Sy = wy => wy * state.view.scale + state.view.offsetY;
+const S2Wx = sx => (sx - state.view.offsetX) / state.view.scale;
+const S2Wy = sy => (sy - state.view.offsetY) / state.view.scale;
+
+// ---- 高DPI対応キャンバスサイズ ----
+let dpr = 1, viewW = 0, viewH = 0;
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  const r = cv.getBoundingClientRect();
+  viewW = r.width; viewH = r.height;
+  cv.width = Math.round(r.width * dpr);
+  cv.height = Math.round(r.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener('resize', resize);
+
+// ---- スナップ ----
+function snapToGrid(w) {
+  if (!state.grid.snap) return w;
+  const s = state.grid.step;
+  return { x: Math.round(w.x / s) * s, y: Math.round(w.y / s) * s };
+}
+// 既存図形の端点・中心に吸着（pxしきい値）
+function snapToObjects(w) {
+  if (!state.grid.osnap) return null;
+  const thr = 12 / state.view.scale; // px→world
+  let best = null, bestD = thr;
+  const consider = (px, py) => {
+    const d = Math.hypot(px - w.x, py - w.y);
+    if (d < bestD) { bestD = d; best = { x: px, y: py }; }
+  };
+  for (const s of state.shapes) {
+    if (s.type === 'line' || s.type === 'dim') {
+      consider(s.x1, s.y1); consider(s.x2, s.y2);
+      consider((s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2);
+    } else if (s.type === 'rect') {
+      consider(s.x, s.y); consider(s.x + s.w, s.y);
+      consider(s.x, s.y + s.h); consider(s.x + s.w, s.y + s.h);
+      consider(s.x + s.w / 2, s.y + s.h / 2);
+    } else if (s.type === 'circle') {
+      consider(s.cx, s.cy);
+      consider(s.cx + s.r, s.cy); consider(s.cx - s.r, s.cy);
+      consider(s.cx, s.cy + s.r); consider(s.cx, s.cy - s.r);
+    } else if (s.type === 'polyline') {
+      for (const p of s.points) consider(p.x, p.y);
+    }
+  }
+  return best;
+}
+// 入力点(screen)→確定world点（端点スナップ優先、なければグリッド）
+function resolvePoint(sx, sy) {
+  const w = { x: S2Wx(sx), y: S2Wy(sy) };
+  const o = snapToObjects(w);
+  if (o) { snapMarker = o; return o; }
+  const g = snapToGrid(w);
+  snapMarker = state.grid.snap ? g : null;
+  return g;
+}
+
+// =========================================================================
+// 入力サニタイズ（外部JSON/localStorage由来データの検証。XSS源・クラッシュ・proto汚染対策）
+// =========================================================================
+const isNum = v => Number.isFinite(+v);
+const num = (v, d = 0) => (isNum(v) ? +v : d);
+// 色は #hex / none / 基本色名 のみ許可。不正は既定値へ
+function safeColor(v, fallback) {
+  if (v == null) return fallback;
+  const s = String(v);
+  return /^(#[0-9a-fA-F]{3,8}|none|[a-zA-Z]{3,20})$/.test(s) ? s : fallback;
+}
+function sanitizeShape(s) {
+  if (!s || typeof s !== 'object') return null;
+  const base = {
+    id: String(s.id || uid()).slice(0, 40),
+    layer: String(s.layer || '').slice(0, 40),
+    stroke: safeColor(s.stroke, '#38bdf8'),
+    fill: s.fill == null ? null : safeColor(s.fill, null),
+    strokeWidth: Math.max(0.1, num(s.strokeWidth, 2)),
+    rot: num(s.rot, 0),
+  };
+  switch (s.type) {
+    case 'line': case 'dim':
+      return { ...base, type: s.type, x1: num(s.x1), y1: num(s.y1), x2: num(s.x2), y2: num(s.y2) };
+    case 'rect':
+      return { ...base, type: 'rect', x: num(s.x), y: num(s.y), w: num(s.w), h: num(s.h) };
+    case 'circle':
+      return { ...base, type: 'circle', cx: num(s.cx), cy: num(s.cy), r: Math.max(0, num(s.r)) };
+    case 'polyline':
+      if (!Array.isArray(s.points) || !s.points.length) return null;
+      return { ...base, type: 'polyline', closed: !!s.closed, points: s.points.map(p => ({ x: num(p && p.x), y: num(p && p.y) })) };
+    case 'text':
+      return { ...base, type: 'text', x: num(s.x), y: num(s.y), fontSize: Math.max(1, num(s.fontSize, 16)), text: String(s.text == null ? '' : s.text).slice(0, 5000) };
+    default:
+      return null;
+  }
+}
+function sanitizeShapes(arr) {
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set();
+  return arr.map(sanitizeShape).filter(Boolean).map(s => {
+    if (seen.has(s.id)) s.id = uid(); // id重複は再採番(取り違え防止)
+    seen.add(s.id); return s;
+  });
+}
+function sanitizeLayers(arr) {
+  if (!Array.isArray(arr) || !arr.length) return null;
+  return arr.map((l, i) => l && typeof l === 'object' ? {
+    id: String(l.id || ('L' + (i + 1))).slice(0, 40),
+    name: String(l.name || ('レイヤー' + (i + 1))).slice(0, 100),
+    visible: l.visible !== false, locked: !!l.locked,
+  } : null).filter(Boolean);
+}
+// viewは scale が有限かつ正のときのみ採用（壊れた値で空白キャンバスになるのを防ぐ）
+function safeView(v) {
+  if (v && isNum(v.scale) && v.scale > 0 && isNum(v.offsetX) && isNum(v.offsetY))
+    return { scale: Math.min(200, Math.max(0.05, +v.scale)), offsetX: +v.offsetX, offsetY: +v.offsetY };
+  return null;
+}
+// __proto__等を除去するJSON.parse
+function safeParse(str) {
+  return JSON.parse(str, (k, val) => (k === '__proto__' || k === 'constructor' || k === 'prototype') ? undefined : val);
+}
+
+// =========================================================================
+// 描画
+// =========================================================================
+function draw() {
+  ctx.clearRect(0, 0, viewW, viewH);
+  if (state.grid.show) drawGrid();
+  for (const s of state.shapes) { if (!isVisible(s)) continue; drawShape(s, state.selection.has(s.id)); }
+  // 単一選択かつ選択ツール時のみ変形ハンドル
+  if (state.tool === 'select' && state.selection.size === 1) {
+    const sel = selectedShape();
+    if (sel && !isLocked(sel)) drawHandles(sel);
+  }
+  if (draft) drawDraft();
+  if (polyPts) drawPolyDraft();
+  if (snapMarker) drawSnapMarker(snapMarker);
+  updateStatusCounts();
+  updateNumPanel();
+}
+
+function drawGrid() {
+  const step = state.grid.step;
+  // 画面に見えるワールド範囲
+  const x0 = S2Wx(0), y0 = S2Wy(0), x1 = S2Wx(viewW), y1 = S2Wy(viewH);
+  // ステップが細かすぎて潰れる場合は間引く
+  let gs = step;
+  while (gs * state.view.scale < 6) gs *= 5;
+
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(148,163,184,0.12)';
+  ctx.beginPath();
+  for (let x = Math.floor(x0 / gs) * gs; x <= x1; x += gs) {
+    const sx = W2Sx(x); ctx.moveTo(sx, 0); ctx.lineTo(sx, viewH);
+  }
+  for (let y = Math.floor(y0 / gs) * gs; y <= y1; y += gs) {
+    const sy = W2Sy(y); ctx.moveTo(0, sy); ctx.lineTo(viewW, sy);
+  }
+  ctx.stroke();
+
+  // 原点軸
+  ctx.strokeStyle = 'rgba(56,189,248,0.45)';
+  ctx.beginPath();
+  ctx.moveTo(W2Sx(0), 0); ctx.lineTo(W2Sx(0), viewH);
+  ctx.moveTo(0, W2Sy(0)); ctx.lineTo(viewW, W2Sy(0));
+  ctx.stroke();
+}
+
+function applyStyle(s) {
+  ctx.strokeStyle = s.stroke || '#38bdf8';
+  ctx.lineWidth = (s.strokeWidth || 2);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+}
+
+function drawShape(s, selected) {
+  const rot = s.rot || 0;
+  const hasRot = Math.abs(rot) > 1e-9;
+  if (hasRot) { // 図形中心まわりにコンテキストを回転
+    const c = shapeCenter(s), cx = W2Sx(c.x), cy = W2Sy(c.y);
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot); ctx.translate(-cx, -cy);
+  }
+  applyStyle(s);
+  ctx.beginPath();
+  if (s.type === 'line') {
+    ctx.moveTo(W2Sx(s.x1), W2Sy(s.y1)); ctx.lineTo(W2Sx(s.x2), W2Sy(s.y2));
+    ctx.stroke();
+  } else if (s.type === 'rect') {
+    const x = W2Sx(s.x), y = W2Sy(s.y), w = s.w * state.view.scale, h = s.h * state.view.scale;
+    if (s.fill) { ctx.fillStyle = s.fill; ctx.fillRect(x, y, w, h); }
+    ctx.strokeRect(x, y, w, h);
+  } else if (s.type === 'circle') {
+    ctx.arc(W2Sx(s.cx), W2Sy(s.cy), s.r * state.view.scale, 0, Math.PI * 2);
+    if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(); }
+    ctx.stroke();
+  } else if (s.type === 'polyline') {
+    const p = s.points;
+    if (p.length) {
+      ctx.moveTo(W2Sx(p[0].x), W2Sy(p[0].y));
+      for (let i = 1; i < p.length; i++) ctx.lineTo(W2Sx(p[i].x), W2Sy(p[i].y));
+      if (s.closed) ctx.closePath();
+      if (s.fill && s.closed) { ctx.fillStyle = s.fill; ctx.fill(); }
+      ctx.stroke();
+    }
+  } else if (s.type === 'dim') {
+    drawDimension(s);
+  } else if (s.type === 'text') {
+    ctx.fillStyle = s.stroke || '#e2e8f0';
+    ctx.font = (s.fontSize * state.view.scale) + 'px system-ui, "Noto Sans JP", sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(s.text || '', W2Sx(s.x), W2Sy(s.y));
+  }
+  if (hasRot) ctx.restore();
+  if (selected) drawSelectionDecor(s);
+}
+
+// 寸法線（矢羽根＋距離ラベル）
+function drawDimension(s) {
+  const ax = W2Sx(s.x1), ay = W2Sy(s.y1), bx = W2Sx(s.x2), by = W2Sy(s.y2);
+  ctx.strokeStyle = s.stroke || '#fbbf24';
+  ctx.fillStyle = s.stroke || '#fbbf24';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+  const ang = Math.atan2(by - ay, bx - ax), al = 8;
+  for (const [px, py, dir] of [[ax, ay, ang], [bx, by, ang + Math.PI]]) {
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + al * Math.cos(dir + 0.4), py + al * Math.sin(dir + 0.4));
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + al * Math.cos(dir - 0.4), py + al * Math.sin(dir - 0.4));
+    ctx.stroke();
+  }
+  const dist = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+  const mx = (ax + bx) / 2, my = (ay + by) / 2;
+  const label = dist.toFixed(1) + ' mm';
+  ctx.font = '12px system-ui';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(15,23,42,0.85)';
+  ctx.fillRect(mx - tw / 2 - 4, my - 18, tw + 8, 16);
+  ctx.fillStyle = s.stroke || '#fbbf24';
+  ctx.fillText(label, mx, my - 4);
+}
+
+// 選択点線枠(回転追従)。ハンドルは drawHandles で別途
+function drawSelectionDecor(s) {
+  const hg = handleGeom(s); if (!hg) return;
+  const c = hg.corners.map(p => ({ x: W2Sx(p.x), y: W2Sy(p.y) }));
+  ctx.save();
+  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.moveTo(c[0].x, c[0].y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(c[i].x, c[i].y);
+  ctx.closePath(); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+// リサイズ/回転ハンドル(単一選択時)
+function drawHandles(s) {
+  const hg = handleGeom(s);
+  const c = hg.corners.map(p => ({ x: W2Sx(p.x), y: W2Sy(p.y) }));
+  const rh = { x: W2Sx(hg.rotHandle.x), y: W2Sy(hg.rotHandle.y) };
+  const tm = { x: W2Sx(hg.topMid.x), y: W2Sy(hg.topMid.y) };
+  ctx.save();
+  // 回転ハンドルへの接続線
+  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(tm.x, tm.y); ctx.lineTo(rh.x, rh.y); ctx.stroke();
+  // 角ハンドル(四角)
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#0ea5e9'; ctx.lineWidth = 1.5;
+  for (const p of c) { ctx.beginPath(); ctx.rect(p.x - 5, p.y - 5, 10, 10); ctx.fill(); ctx.stroke(); }
+  // 回転ハンドル(丸)
+  ctx.fillStyle = '#34d399';
+  ctx.beginPath(); ctx.arc(rh.x, rh.y, 6, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+function drawDraft() {
+  const s = draft;
+  applyStyle(state.style);
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  let label = '';
+  if (s.type === 'line' || s.type === 'dim') {
+    ctx.moveTo(W2Sx(s.x1), W2Sy(s.y1)); ctx.lineTo(W2Sx(s.x2), W2Sy(s.y2)); ctx.stroke();
+    label = Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(1) + ' mm';
+    showMeasure((W2Sx(s.x1) + W2Sx(s.x2)) / 2, (W2Sy(s.y1) + W2Sy(s.y2)) / 2, label);
+  } else if (s.type === 'rect') {
+    const x = W2Sx(s.x), y = W2Sy(s.y);
+    ctx.strokeRect(x, y, s.w * state.view.scale, s.h * state.view.scale);
+    label = Math.abs(s.w).toFixed(1) + ' × ' + Math.abs(s.h).toFixed(1) + ' mm';
+    showMeasure(x + s.w * state.view.scale / 2, y + s.h * state.view.scale / 2, label);
+  } else if (s.type === 'circle') {
+    ctx.arc(W2Sx(s.cx), W2Sy(s.cy), s.r * state.view.scale, 0, Math.PI * 2); ctx.stroke();
+    label = 'r ' + s.r.toFixed(1) + ' mm';
+    showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
+  }
+  ctx.setLineDash([]);
+}
+
+function drawPolyDraft() {
+  const p = polyPts;
+  applyStyle(state.style);
+  ctx.beginPath();
+  ctx.moveTo(W2Sx(p[0].x), W2Sy(p[0].y));
+  for (let i = 1; i < p.length; i++) ctx.lineTo(W2Sx(p[i].x), W2Sy(p[i].y));
+  ctx.stroke();
+  // 確定済み頂点
+  ctx.fillStyle = '#38bdf8';
+  for (const v of p) { ctx.beginPath(); ctx.arc(W2Sx(v.x), W2Sy(v.y), 3.5, 0, 7); ctx.fill(); }
+  // 始点近接ハイライト（閉じる予告）
+  ctx.strokeStyle = 'rgba(56,189,248,.6)';
+  ctx.beginPath(); ctx.arc(W2Sx(p[0].x), W2Sy(p[0].y), 9, 0, 7); ctx.stroke();
+}
+
+function drawSnapMarker(w) {
+  const x = W2Sx(w.x), y = W2Sy(w.y);
+  ctx.save();
+  ctx.strokeStyle = '#34d399'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(x - 5, y - 5, 10, 10);
+  ctx.restore();
+}
+
+function showMeasure(x, y, text) {
+  // ライブ寸法はキャンバスに直接描く
+  ctx.save();
+  ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(text).width;
+  ctx.fillStyle = 'rgba(15,23,42,0.9)';
+  ctx.fillRect(x - tw / 2 - 5, y - 9, tw + 10, 18);
+  ctx.fillStyle = '#7dd3fc';
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+// =========================================================================
+// 数値直接入力パネル（単一選択時に座標・寸法を編集）
+// =========================================================================
+const numProps = document.getElementById('numProps');
+let numBuiltFor = null; // 現在パネルを構築済みの図形id
+function selectedShape() {
+  if (state.selection.size !== 1) return null;
+  const id = [...state.selection][0];
+  return state.shapes.find(s => s.id === id) || null;
+}
+function fieldsFor(s) {
+  if (s.type === 'line' || s.type === 'dim') return [['x1', 'X1'], ['y1', 'Y1'], ['x2', 'X2'], ['y2', 'Y2']];
+  if (s.type === 'rect') return [['x', 'X'], ['y', 'Y'], ['w', '幅'], ['h', '高さ']];
+  if (s.type === 'circle') return [['cx', '中心X'], ['cy', '中心Y'], ['r', '半径']];
+  if (s.type === 'text') return [['x', 'X'], ['y', 'Y'], ['fontSize', '字高']];
+  return null;
+}
+const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', polyline: 'ポリライン' }[t] || t);
+
+// 選択が変わったら再構築、同じならば値だけ同期（フォーカス中の欄は触らない）
+function updateNumPanel() {
+  const s = selectedShape();
+  const fields = s && fieldsFor(s);
+  if (!fields) {
+    if (numProps.childNodes.length) { numProps.innerHTML = ''; } // DOMが残っていれば必ず消す
+    numBuiltFor = null;
+    return;
+  }
+  if (numBuiltFor !== s.id) buildNumPanel(s, fields);
+  else syncNumValues(s);
+}
+function buildNumPanel(s, fields) {
+  numProps.innerHTML = '';
+  const hr = document.createElement('hr'); hr.style.borderColor = 'var(--line)';
+  const title = document.createElement('div'); title.className = 'nptitle'; title.textContent = '寸法 (' + jpType(s.type) + ')';
+  numProps.append(hr, title);
+  // テキストは本文編集欄を先頭に
+  if (s.type === 'text') {
+    const row = document.createElement('label');
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.value = s.text || ''; inp.style.width = '100%';
+    inp.dataset.ktext = '1';
+    inp.addEventListener('input', () => { const cur = selectedShape(); if (cur) { cur.text = inp.value; draw(); } });
+    inp.addEventListener('change', () => pushHistory());
+    row.append(document.createTextNode('本文 '), inp);
+    numProps.appendChild(row);
+  }
+  for (const [key, label] of fields) {
+    const row = document.createElement('label');
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.step = '1'; inp.dataset.k = key; inp.value = (+s[key]).toFixed(2);
+    inp.addEventListener('input', () => {
+      const cur = selectedShape(); if (!cur) return;
+      const v = parseFloat(inp.value);
+      if (!isNaN(v)) { cur[key] = key === 'r' ? Math.max(0, v) : key === 'fontSize' ? Math.max(0.1, v) : v; draw(); }
+    });
+    inp.addEventListener('change', () => { pushHistory(); });
+    row.append(document.createTextNode(label + ' '), inp);
+    numProps.appendChild(row);
+  }
+  if (s.type === 'line' || s.type === 'dim') {
+    const len = document.createElement('div'); len.className = 'npro'; len.id = 'npLen';
+    len.textContent = '長さ ' + Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(2) + ' mm';
+    numProps.appendChild(len);
+  }
+  // 角度(度)編集欄
+  const arow = document.createElement('label');
+  const ainp = document.createElement('input');
+  ainp.type = 'number'; ainp.step = '1'; ainp.dataset.kdeg = '1';
+  ainp.value = ((s.rot || 0) * 180 / Math.PI).toFixed(1);
+  ainp.addEventListener('input', () => { const cur = selectedShape(); if (!cur) return; const v = parseFloat(ainp.value); if (!isNaN(v)) { cur.rot = v * Math.PI / 180; draw(); } });
+  ainp.addEventListener('change', () => pushHistory());
+  arow.append(document.createTextNode('角度° '), ainp);
+  numProps.appendChild(arow);
+  numBuiltFor = s.id;
+}
+function syncNumValues(s) {
+  numProps.querySelectorAll('input[data-k]').forEach(inp => {
+    if (document.activeElement !== inp) inp.value = (+s[inp.dataset.k]).toFixed(2);
+  });
+  const adeg = numProps.querySelector('input[data-kdeg]');
+  if (adeg && document.activeElement !== adeg) adeg.value = ((s.rot || 0) * 180 / Math.PI).toFixed(1);
+  const len = document.getElementById('npLen');
+  if (len) len.textContent = '長さ ' + Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(2) + ' mm';
+}
+
+// 図形のバウンディングボックス(world)
+function bbox(s) {
+  if (s.type === 'line' || s.type === 'dim')
+    return { x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2), w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1) };
+  if (s.type === 'rect') return { x: s.x, y: s.y, w: s.w, h: s.h };
+  if (s.type === 'circle') return { x: s.cx - s.r, y: s.cy - s.r, w: s.r * 2, h: s.r * 2 };
+  if (s.type === 'polyline') {
+    const xs = s.points.map(p => p.x), ys = s.points.map(p => p.y);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  }
+  if (s.type === 'text') {
+    const sz = textSize(s);
+    return { x: s.x, y: s.y, w: sz.w, h: sz.h };
+  }
+  return null;
+}
+// テキストの実寸(world mm)。フォントをmm単位で設定し測定（線形なので倍率不要）
+function textSize(s) {
+  ctx.save();
+  ctx.font = (s.fontSize || 16) + 'px system-ui, "Noto Sans JP", sans-serif';
+  const w = ctx.measureText(s.text || '').width;
+  ctx.restore();
+  return { w: Math.max(w, 1), h: (s.fontSize || 16) };
+}
+
+// =========================================================================
+// ヒットテスト（選択用）
+// =========================================================================
+function hitTest(wx, wy) {
+  const thr = 8 / state.view.scale; // クリック許容(world)
+  for (let i = state.shapes.length - 1; i >= 0; i--) {
+    const s = state.shapes[i];
+    if (!isVisible(s) || isLocked(s)) continue; // 非表示/ロック層は選択不可
+    // 回転図形は問い合わせ点を逆回転してローカル座標で判定
+    let qx = wx, qy = wy;
+    if (s.rot) { const c = shapeCenter(s); const lp = rotatePt(wx, wy, c.x, c.y, -s.rot); qx = lp.x; qy = lp.y; }
+    if (s.type === 'line' || s.type === 'dim') {
+      if (distToSeg(qx, qy, s.x1, s.y1, s.x2, s.y2) < thr) return s;
+    } else if (s.type === 'rect') {
+      if (s.fill && qx >= s.x && qx <= s.x + s.w && qy >= s.y && qy <= s.y + s.h) return s;
+      const edges = [[s.x, s.y, s.x + s.w, s.y], [s.x + s.w, s.y, s.x + s.w, s.y + s.h],
+                     [s.x + s.w, s.y + s.h, s.x, s.y + s.h], [s.x, s.y + s.h, s.x, s.y]];
+      for (const e of edges) if (distToSeg(qx, qy, ...e) < thr) return s;
+    } else if (s.type === 'circle') {
+      const d = Math.hypot(qx - s.cx, qy - s.cy);
+      if (s.fill && d <= s.r) return s;
+      if (Math.abs(d - s.r) < thr) return s;
+    } else if (s.type === 'polyline') {
+      const p = s.points;
+      for (let k = 0; k < p.length - 1; k++)
+        if (distToSeg(qx, qy, p[k].x, p[k].y, p[k + 1].x, p[k + 1].y) < thr) return s;
+      if (s.closed && p.length > 1 && distToSeg(qx, qy, p[p.length - 1].x, p[p.length - 1].y, p[0].x, p[0].y) < thr) return s;
+    } else if (s.type === 'text') {
+      const b = bbox(s);
+      if (qx >= b.x - thr && qx <= b.x + b.w + thr && qy >= b.y - thr && qy <= b.y + b.h + thr) return s;
+    }
+  }
+  return null;
+}
+function distToSeg(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+// ===== 変形(回転・リサイズ)ヘルパー =====
+function rotatePt(px, py, cx, cy, a) {
+  const s = Math.sin(a), c = Math.cos(a), dx = px - cx, dy = py - cy;
+  return { x: cx + dx * c - dy * s, y: cy + dx * s + dy * c };
+}
+function shapeCenter(s) { const b = bbox(s); return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; }
+// 回転を考慮した軸平行な外接矩形(world)。fit/SVGサイズ用
+function shapeExtent(s) {
+  const b = bbox(s); if (!b) return b;
+  const a = s.rot || 0;
+  if (!a) return b;
+  const c = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+  const pts = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]]
+    .map(([x, y]) => rotatePt(x, y, c.x, c.y, a));
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+}
+// 選択ハンドルの幾何(回転済みworld座標)
+function handleGeom(s) {
+  const b = bbox(s), a = s.rot || 0;
+  const c = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+  const local = [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }];
+  const corners = local.map(p => rotatePt(p.x, p.y, c.x, c.y, a));
+  const handleDist = 26 / state.view.scale;
+  const rotHandle = rotatePt(b.x + b.w / 2, b.y - handleDist, c.x, c.y, a);
+  const topMid = rotatePt(b.x + b.w / 2, b.y, c.x, c.y, a);
+  return { center: c, corners, localCorners: local, rotHandle, topMid, angle: a };
+}
+// 図形をローカル座標で(ax,ay)中心に(sx,sy)倍する
+function scaleShapeAbout(s, ax, ay, sx, sy) {
+  const f = (px, py) => ({ x: ax + (px - ax) * sx, y: ay + (py - ay) * sy });
+  if (s.type === 'line' || s.type === 'dim') {
+    const p1 = f(s.x1, s.y1), p2 = f(s.x2, s.y2);
+    s.x1 = p1.x; s.y1 = p1.y; s.x2 = p2.x; s.y2 = p2.y;
+  } else if (s.type === 'rect') {
+    const p1 = f(s.x, s.y), p2 = f(s.x + s.w, s.y + s.h);
+    s.x = Math.min(p1.x, p2.x); s.y = Math.min(p1.y, p2.y);
+    s.w = Math.abs(p2.x - p1.x); s.h = Math.abs(p2.y - p1.y);
+  } else if (s.type === 'circle') {
+    const cc = f(s.cx, s.cy); s.cx = cc.x; s.cy = cc.y;
+    s.r = Math.max(0.01, s.r * (Math.abs(sx) + Math.abs(sy)) / 2);
+  } else if (s.type === 'text') {
+    const pp = f(s.x, s.y); s.x = pp.x; s.y = pp.y;
+    s.fontSize = Math.max(1, s.fontSize * Math.abs(sy));
+  } else if (s.type === 'polyline') {
+    for (const p of s.points) { const np = f(p.x, p.y); p.x = np.x; p.y = np.y; }
+  }
+}
+
+// 図形を平行移動
+function translateShape(s, dx, dy) {
+  if (s.type === 'line' || s.type === 'dim') { s.x1 += dx; s.y1 += dy; s.x2 += dx; s.y2 += dy; }
+  else if (s.type === 'rect') { s.x += dx; s.y += dy; }
+  else if (s.type === 'circle') { s.cx += dx; s.cy += dy; }
+  else if (s.type === 'text') { s.x += dx; s.y += dy; }
+  else if (s.type === 'polyline') for (const p of s.points) { p.x += dx; p.y += dy; }
+}
+
+// =========================================================================
+// ポインタ入力（マウス/タッチ/ペン統一）
+// =========================================================================
+const pointers = new Map();   // id -> {x,y}
+let pinch = null;             // {dist, cx, cy} 2本指ジェスチャ
+let panning = false;          // 中ボタン/スペースパン
+let spaceDown = false;
+let downScreen = null;
+
+function getXY(e) {
+  const r = cv.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+cv.addEventListener('pointerdown', e => {
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {} // 一部環境/合成イベントで例外を投げるため保護
+  const p = getXY(e);
+  pointers.set(e.pointerId, p);
+  downScreen = p;
+
+  if (pointers.size === 2) {
+    // ピンチ開始：作図途中ならドラフト破棄
+    draft = null; dragMove = null;
+    const [a, b] = [...pointers.values()];
+    pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+    return;
+  }
+  if (pointers.size > 2) return;
+
+  // 中ボタン or スペース → パン
+  if (e.button === 1 || spaceDown) { panning = true; return; }
+
+  onToolDown(p);
+});
+
+cv.addEventListener('pointermove', e => {
+  const p = getXY(e);
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
+
+  if (pinch && pointers.size >= 2) {
+    const [a, b] = [...pointers.values()];
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    // ズーム（中点を中心に）
+    const factor = dist / (pinch.dist || dist);
+    zoomAt(cx, cy, factor);
+    // パン（中点移動分）
+    state.view.offsetX += cx - pinch.cx;
+    state.view.offsetY += cy - pinch.cy;
+    pinch = { dist, cx, cy };
+    draw();
+    return;
+  }
+
+  // 座標表示
+  const w = { x: S2Wx(p.x), y: S2Wy(p.y) };
+  document.getElementById('sx').textContent = w.x.toFixed(1);
+  document.getElementById('sy').textContent = w.y.toFixed(1);
+
+  if (panning) {
+    state.view.offsetX += e.movementX; state.view.offsetY += e.movementY;
+    draw(); return;
+  }
+
+  onToolMove(p);
+});
+
+function endPointer(e) {
+  const wasPinch = pinch && pointers.size >= 2;
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (panning) { panning = false; return; }
+  if (wasPinch) return; // ピンチ解除時はツール操作しない
+  if (pointers.size >= 1) return;
+  onToolUp(getXY(e));
+}
+cv.addEventListener('pointerup', endPointer);
+cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinch = null; panning = false; draft = null; });
+
+// ホイールズーム
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const p = getXY(e);
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  zoomAt(p.x, p.y, factor);
+  draw();
+}, { passive: false });
+
+function zoomAt(sx, sy, factor) {
+  const newScale = Math.min(200, Math.max(0.05, state.view.scale * factor));
+  const f = newScale / state.view.scale;
+  // 画面点(sx,sy)のワールド位置を固定したままスケール変更
+  state.view.offsetX = sx - (sx - state.view.offsetX) * f;
+  state.view.offsetY = sy - (sy - state.view.offsetY) * f;
+  state.view.scale = newScale;
+  updateZoomLabel();
+}
+
+// =========================================================================
+// ツールごとの入力処理
+// =========================================================================
+function onToolDown(p) {
+  const t = state.tool;
+  const w = resolvePoint(p.x, p.y);
+
+  if (t === 'select') {
+    // 単一選択中はまず変形ハンドルを判定
+    if (state.selection.size === 1) {
+      const sel = selectedShape();
+      if (sel && !isLocked(sel) && startHandleDrag(sel, p)) return;
+    }
+    const hit = hitTest(S2Wx(p.x), S2Wy(p.y));
+    if (hit) {
+      if (!state.selection.has(hit.id)) { state.selection.clear(); state.selection.add(hit.id); }
+      const orig = new Map();
+      for (const id of state.selection) {
+        const s = state.shapes.find(x => x.id === id);
+        orig.set(id, JSON.parse(JSON.stringify(s)));
+      }
+      dragMove = { startWorld: { x: S2Wx(p.x), y: S2Wy(p.y) }, orig, moved: false };
+    } else {
+      state.selection.clear();
+    }
+    draw(); return;
+  }
+
+  if (t === 'erase') {
+    const hit = hitTest(S2Wx(p.x), S2Wy(p.y));
+    if (hit) { state.shapes = state.shapes.filter(s => s.id !== hit.id); pushHistory(); draw(); }
+    return;
+  }
+
+  if (t === 'line' || t === 'dim') { draft = { type: t, x1: w.x, y1: w.y, x2: w.x, y2: w.y }; }
+  else if (t === 'rect') { draft = { type: 'rect', x: w.x, y: w.y, w: 0, h: 0, _ox: w.x, _oy: w.y }; }
+  else if (t === 'circle') { draft = { type: 'circle', cx: w.x, cy: w.y, r: 0 }; }
+  else if (t === 'polyline') { handlePolyTap(w); }
+  else if (t === 'text') { openTextEditor(w, null); }
+  draw();
+}
+
+// ハンドルを掴んだか判定し、掴んだらドラッグ開始
+function startHandleDrag(s, p) {
+  const hg = handleGeom(s);
+  const sd = (wp) => Math.hypot(p.x - W2Sx(wp.x), p.y - W2Sy(wp.y));
+  // 回転ハンドル
+  if (sd(hg.rotHandle) < 14) {
+    const wx = S2Wx(p.x), wy = S2Wy(p.y);
+    handleDrag = { mode: 'rotate', id: s.id, orig: JSON.parse(JSON.stringify(s)),
+      center: hg.center, startAng: Math.atan2(wy - hg.center.y, wx - hg.center.x), startRot: s.rot || 0, changed: false };
+    return true;
+  }
+  // 角ハンドル(リサイズ)
+  for (let i = 0; i < 4; i++) {
+    if (sd(hg.corners[i]) < 14) {
+      const anchorLocal = hg.localCorners[(i + 2) % 4]; // 対角
+      handleDrag = { mode: 'resize', id: s.id, orig: JSON.parse(JSON.stringify(s)),
+        center: hg.center, cornerIdx: i, anchorLocal: { ...anchorLocal },
+        origCornerLocal: { ...hg.localCorners[i] }, angle: hg.angle, changed: false };
+      return true;
+    }
+  }
+  return false;
+}
+function doHandleDrag(p) {
+  const s = state.shapes.find(x => x.id === handleDrag.id); if (!s) return;
+  const wx = S2Wx(p.x), wy = S2Wy(p.y);
+  if (handleDrag.mode === 'rotate') {
+    let ang = Math.atan2(wy - handleDrag.center.y, wx - handleDrag.center.x);
+    let rot = handleDrag.startRot + (ang - handleDrag.startAng);
+    if (state.grid.snap) { const step = Math.PI / 12; rot = Math.round(rot / step) * step; } // 15度スナップ
+    s.rot = rot;
+  } else {
+    // pointerをローカル座標へ(中心まわり逆回転)
+    const lp = rotatePt(wx, wy, handleDrag.center.x, handleDrag.center.y, -handleDrag.angle);
+    let lx = lp.x, ly = lp.y;
+    if (state.grid.snap) { const g = state.grid.step; lx = Math.round(lx / g) * g; ly = Math.round(ly / g) * g; }
+    const a = handleDrag.anchorLocal, o = handleDrag.origCornerLocal;
+    const dxo = o.x - a.x, dyo = o.y - a.y;
+    let sx = Math.abs(dxo) > 1e-6 ? (lx - a.x) / dxo : 1;
+    let sy = Math.abs(dyo) > 1e-6 ? (ly - a.y) / dyo : 1;
+    // ゼロ対角は1(無変化)にする。0.01だと一度潰れると復元不能になるため
+    if (!isFinite(sx) || sx === 0) sx = 1;
+    if (!isFinite(sy) || sy === 0) sy = 1;
+    // 元形状から作り直す
+    const fresh = JSON.parse(JSON.stringify(handleDrag.orig));
+    Object.assign(s, fresh);
+    scaleShapeAbout(s, a.x, a.y, sx, sy);
+    // 回転中心が移動するため、アンカーのworld位置を保つよう平行移動で補正
+    if (handleDrag.angle) {
+      const oldC = handleDrag.center;
+      const nb = bbox(s); const newC = { x: nb.x + nb.w / 2, y: nb.y + nb.h / 2 };
+      const wantWorld = rotatePt(a.x, a.y, oldC.x, oldC.y, handleDrag.angle);
+      const gotWorld = rotatePt(a.x, a.y, newC.x, newC.y, handleDrag.angle);
+      translateShape(s, wantWorld.x - gotWorld.x, wantWorld.y - gotWorld.y);
+    }
+  }
+  handleDrag.changed = true;
+  draw();
+}
+
+function onToolMove(p) {
+  const t = state.tool;
+
+  if (handleDrag) { doHandleDrag(p); return; }
+  if (dragMove) {
+    const wx = S2Wx(p.x), wy = S2Wy(p.y);
+    let dx = wx - dragMove.startWorld.x, dy = wy - dragMove.startWorld.y;
+    // 移動先をグリッド吸着（最初の選択図形基準）
+    for (const [id, o] of dragMove.orig) {
+      const s = state.shapes.find(x => x.id === id);
+      const ns = JSON.parse(JSON.stringify(o));
+      translateShape(ns, dx, dy);
+      Object.assign(s, ns);
+    }
+    dragMove.moved = true;
+    draw(); return;
+  }
+
+  if (!draft) {
+    // 選択ツールでなければスナップマーカーだけ更新
+    if (t !== 'select') { resolvePoint(p.x, p.y); draw(); }
+    return;
+  }
+  const w = resolvePoint(p.x, p.y);
+  if (draft.type === 'line' || draft.type === 'dim') { draft.x2 = w.x; draft.y2 = w.y; }
+  else if (draft.type === 'rect') { draft.x = Math.min(draft._ox, w.x); draft.y = Math.min(draft._oy, w.y); draft.w = Math.abs(w.x - draft._ox); draft.h = Math.abs(w.y - draft._oy); }
+  else if (draft.type === 'circle') { draft.r = Math.hypot(w.x - draft.cx, w.y - draft.cy); }
+  draw();
+}
+
+function onToolUp(p) {
+  if (handleDrag) {
+    if (handleDrag.changed) pushHistory();
+    handleDrag = null; return;
+  }
+  if (dragMove) {
+    if (dragMove.moved) pushHistory();
+    dragMove = null; return;
+  }
+  if (!draft) return;
+  const s = draft; draft = null; snapMarker = null;
+  const sty = () => ({ stroke: state.style.stroke, strokeWidth: state.style.strokeWidth, fill: state.style.fill, layer: state.activeLayer });
+
+  if (s.type === 'line' || s.type === 'dim') {
+    if (Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < 0.01) { draw(); return; }
+    state.shapes.push({ id: uid(), type: s.type, x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, ...sty(), stroke: s.type === 'dim' ? '#fbbf24' : state.style.stroke });
+  } else if (s.type === 'rect') {
+    if (s.w < 0.01 || s.h < 0.01) { draw(); return; }
+    state.shapes.push({ id: uid(), type: 'rect', x: s.x, y: s.y, w: s.w, h: s.h, ...sty() });
+  } else if (s.type === 'circle') {
+    if (s.r < 0.01) { draw(); return; }
+    state.shapes.push({ id: uid(), type: 'circle', cx: s.cx, cy: s.cy, r: s.r, ...sty() });
+  }
+  pushHistory(); draw();
+}
+
+// ---- ポリライン ----
+function handlePolyTap(w) {
+  if (!polyPts) { polyPts = [{ x: w.x, y: w.y }]; document.getElementById('confirmBar').classList.add('show'); return; }
+  // 始点近接で閉じて確定
+  const first = polyPts[0];
+  if (polyPts.length >= 2 && Math.hypot(w.x - first.x, w.y - first.y) * state.view.scale < 12) {
+    commitPoly(true); return;
+  }
+  polyPts.push({ x: w.x, y: w.y });
+}
+function commitPoly(closed) {
+  if (polyPts && polyPts.length >= 2) {
+    state.shapes.push({ id: uid(), type: 'polyline', points: polyPts.map(p => ({ x: p.x, y: p.y })), closed: !!closed,
+      stroke: state.style.stroke, strokeWidth: state.style.strokeWidth, fill: state.style.fill, layer: state.activeLayer });
+    pushHistory();
+  }
+  polyPts = null; snapMarker = null;
+  document.getElementById('confirmBar').classList.remove('show');
+  draw();
+}
+// ---- テキスト入力 ----
+const textInput = document.getElementById('textInput');
+let textEditTarget = null;   // 編集対象shape(新規はnull)
+let textEditPos = null;      // 新規配置位置(world)
+function openTextEditor(worldPos, shape) {
+  textEditTarget = shape || null;
+  textEditPos = worldPos || null;
+  const sx = shape ? W2Sx(shape.x) : W2Sx(worldPos.x);
+  const sy = shape ? W2Sy(shape.y) : W2Sy(worldPos.y);
+  textInput.style.left = Math.max(2, sx) + 'px';
+  textInput.style.top = Math.max(2, sy) + 'px';
+  textInput.style.display = 'block';
+  textInput.value = shape ? (shape.text || '') : '';
+  setTimeout(() => { textInput.focus(); textInput.select(); }, 0);
+}
+function commitTextEditor() {
+  if (textInput.style.display === 'none') return;
+  const val = textInput.value;
+  textInput.style.display = 'none';
+  if (textEditTarget) {
+    if (val.trim()) { textEditTarget.text = val; pushHistory(); }
+  } else if (val.trim() && textEditPos) {
+    state.shapes.push({ id: uid(), type: 'text', x: textEditPos.x, y: textEditPos.y, text: val,
+      fontSize: state.style.fontSize, stroke: state.style.stroke, layer: state.activeLayer });
+    pushHistory();
+  }
+  textEditTarget = null; textEditPos = null;
+  draw();
+}
+textInput.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter') { e.preventDefault(); commitTextEditor(); }
+  else if (e.key === 'Escape') { textInput.style.display = 'none'; textEditTarget = null; textEditPos = null; }
+});
+textInput.addEventListener('blur', commitTextEditor);
+
+document.getElementById('plDone').onclick = () => commitPoly(false);
+document.getElementById('plCancel').onclick = () => { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); draw(); };
+// ダブルタップ/ダブルクリック: ポリライン確定 or テキスト編集
+cv.addEventListener('dblclick', e => {
+  if (polyPts) { commitPoly(false); return; }
+  const p = getXY(e);
+  const hit = hitTest(S2Wx(p.x), S2Wy(p.y));
+  if (hit && hit.type === 'text' && !isLocked(hit)) openTextEditor(null, hit);
+});
+
+// =========================================================================
+// UI 接続
+// =========================================================================
+document.querySelectorAll('.tool').forEach(b => {
+  b.addEventListener('click', () => {
+    if (polyPts) commitPoly(false);
+    document.querySelectorAll('.tool').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    state.tool = b.dataset.tool;
+    state.selection.clear();
+    draw();
+  });
+});
+
+// プロパティ
+const pStroke = document.getElementById('pStroke');
+const pFill = document.getElementById('pFill');
+const pFillOn = document.getElementById('pFillOn');
+const pWidth = document.getElementById('pWidth');
+pStroke.oninput = () => state.style.stroke = pStroke.value;
+function updFill() { state.style.fill = pFillOn.checked ? pFill.value : null; }
+pFill.oninput = updFill; pFillOn.onchange = updFill;
+pWidth.oninput = () => { state.style.strokeWidth = parseFloat(pWidth.value); document.getElementById('pWidthVal').textContent = pWidth.value; };
+const pFont = document.getElementById('pFont');
+pFont.oninput = () => { const v = parseFloat(pFont.value); if (!isNaN(v) && v > 0) state.style.fontSize = v; };
+
+document.getElementById('cGrid').onchange = e => { state.grid.show = e.target.checked; draw(); };
+document.getElementById('cSnap').onchange = e => { state.grid.snap = e.target.checked; };
+document.getElementById('cOsnap').onchange = e => { state.grid.osnap = e.target.checked; };
+document.getElementById('gStep').onchange = e => { state.grid.step = parseFloat(e.target.value); document.getElementById('sgrid').textContent = e.target.value + 'mm'; draw(); };
+
+// 選択図形へスタイル適用
+document.getElementById('btnApply').onclick = () => {
+  if (!state.selection.size) { toast('図形を選択してください'); return; }
+  for (const id of state.selection) {
+    const s = state.shapes.find(x => x.id === id);
+    if (!s || s.type === 'dim') continue;
+    if (s.type === 'text') { s.stroke = state.style.stroke; s.fontSize = state.style.fontSize; continue; }
+    s.stroke = state.style.stroke; s.strokeWidth = state.style.strokeWidth; s.fill = state.style.fill;
+  }
+  pushHistory(); draw();
+};
+
+// ===== レイヤーパネル =====
+const layersPanel = document.getElementById('layers');
+const layerListEl = document.getElementById('layerList');
+function toggleLayers(show) {
+  const vis = show !== undefined ? show : layersPanel.style.display === 'none';
+  layersPanel.style.display = vis ? 'flex' : 'none';
+  if (vis) renderLayers();
+}
+function renderLayers() {
+  layerListEl.innerHTML = '';
+  // 上に表示されるレイヤーほど手前（描画は配列末尾が手前なので逆順表示）
+  for (let i = state.layers.length - 1; i >= 0; i--) {
+    const l = state.layers[i];
+    const row = document.createElement('div');
+    row.className = 'lrow' + (l.id === state.activeLayer ? ' active' : '');
+
+    const dot = document.createElement('div'); dot.className = 'ldot'; dot.title = 'アクティブにする';
+    dot.onclick = () => { state.activeLayer = l.id; renderLayers(); };
+
+    const vis = document.createElement('button'); vis.textContent = l.visible ? '👁' : '🙈';
+    vis.className = l.visible ? '' : 'off'; vis.title = '表示/非表示';
+    vis.onclick = () => { l.visible = !l.visible; renderLayers(); draw(); autosave(); };
+
+    const lock = document.createElement('button'); lock.textContent = l.locked ? '🔒' : '🔓';
+    lock.className = l.locked ? '' : 'off'; lock.title = 'ロック';
+    lock.onclick = () => { l.locked = !l.locked; renderLayers(); draw(); autosave(); };
+
+    const name = document.createElement('input'); name.className = 'lname'; name.value = l.name;
+    name.onchange = () => { l.name = name.value || l.name; autosave(); };
+
+    const del = document.createElement('button'); del.textContent = '🗑'; del.title = 'レイヤー削除';
+    del.onclick = () => deleteLayer(l.id);
+
+    row.append(dot, vis, lock, name, del);
+    layerListEl.appendChild(row);
+  }
+}
+function addLayer() {
+  const id = 'L' + (nextLayerId++);
+  state.layers.push({ id, name: 'レイヤー' + (state.layers.length + 1), visible: true, locked: false });
+  state.activeLayer = id;
+  renderLayers(); autosave();
+}
+function deleteLayer(id) {
+  if (state.layers.length <= 1) { toast('最後のレイヤーは削除できません'); return; }
+  const cnt = state.shapes.filter(s => s.layer === id).length;
+  if (cnt && !confirm(`このレイヤーの図形${cnt}個も削除されます。よろしいですか?`)) return;
+  state.shapes = state.shapes.filter(s => s.layer !== id);
+  state.layers = state.layers.filter(l => l.id !== id);
+  if (state.activeLayer === id) state.activeLayer = state.layers[state.layers.length - 1].id;
+  state.selection.clear();
+  pushHistory(); renderLayers(); draw();
+}
+function moveSelectionToActive() {
+  if (!state.selection.size) { toast('図形を選択してください'); return; }
+  for (const sid of state.selection) { const s = state.shapes.find(x => x.id === sid); if (s) s.layer = state.activeLayer; }
+  pushHistory(); draw(); toast('現在レイヤーへ移動しました');
+}
+document.getElementById('btnLayers').onclick = () => toggleLayers();
+document.getElementById('layerClose').onclick = () => toggleLayers(false);
+document.getElementById('layerAdd').onclick = addLayer;
+document.getElementById('layerToSel').onclick = moveSelectionToActive;
+
+// プロパティ折りたたみ
+document.getElementById('propToggle').onclick = () => {
+  document.getElementById('props').classList.toggle('collapsed');
+  document.getElementById('propToggle').textContent = document.getElementById('props').classList.contains('collapsed') ? '▸' : '▾';
+};
+
+// ツールバー
+document.getElementById('btnUndo').onclick = undo;
+document.getElementById('btnRedo').onclick = redo;
+document.getElementById('btnNew').onclick = () => {
+  if (state.shapes.length && !confirm('すべての図形を削除します。よろしいですか?')) return;
+  state.shapes = []; state.selection.clear(); pushHistory(); draw();
+};
+document.getElementById('btnFit').onclick = fitView;
+
+// 保存/読込
+document.getElementById('btnSave').onclick = () => {
+  const data = JSON.stringify({ version: 1, shapes: state.shapes, view: state.view, layers: state.layers, activeLayer: state.activeLayer }, null, 2);
+  downloadBlob(new Blob([data], { type: 'application/json' }), 'drawing.json');
+};
+document.getElementById('btnLoad').onclick = () => document.getElementById('fileInput').click();
+document.getElementById('fileInput').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const o = safeParse(rd.result);
+      if (!Array.isArray(o.shapes)) throw new Error('不正なファイル');
+      state.shapes = sanitizeShapes(o.shapes);
+      // idの再採番衝突を避ける
+      let mx = 0; for (const s of state.shapes) { const n = parseInt((s.id || '').replace('s', '')); if (n > mx) mx = n; }
+      nextId = mx + 1;
+      const v = safeView(o.view); if (v) state.view = v;
+      const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls;
+      if (o.activeLayer) state.activeLayer = String(o.activeLayer);
+      ensureLayers();
+      state.selection.clear();
+      if (layersPanelOpen()) renderLayers();
+      resetHistory();
+      draw(); autosave(); updateZoomLabel(); toast('読み込みました');
+    } catch (err) { toast('読み込み失敗: ' + err.message); }
+  };
+  rd.readAsText(f);
+  e.target.value = '';
+};
+
+document.getElementById('btnSvg').onclick = exportSVG;
+document.getElementById('btnPng').onclick = exportPNG;
+document.getElementById('btnPdf').onclick = exportPDF;
+
+// キーボード
+window.addEventListener('keydown', e => {
+  // 入力欄編集中はキャンバス用ショートカットを無効化
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  if (e.key === ' ') spaceDown = true;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && state.selection.size) {
+    e.preventDefault();
+    state.shapes = state.shapes.filter(s => !state.selection.has(s.id));
+    state.selection.clear(); pushHistory(); draw();
+  }
+  if (e.key === 'Enter' && polyPts) commitPoly(false);
+  if (e.key === 'Escape') { draft = null; if (polyPts) { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
+});
+window.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; });
+
+// =========================================================================
+// ビュー / ユーティリティ
+// =========================================================================
+// 図形群の回転考慮・軸平行外接矩形(world)。無ければnull
+function computeExtent(shapes) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const s of shapes) {
+    const b = shapeExtent(s); if (!b) continue;
+    minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h);
+  }
+  return isFinite(minX) ? { minX, minY, maxX, maxY } : null;
+}
+function fitView() {
+  const e = computeExtent(state.shapes);
+  if (!e) {
+    state.view = { scale: 2, offsetX: viewW / 2, offsetY: viewH / 2 };
+    draw(); updateZoomLabel(); return;
+  }
+  const pad = 40;
+  const w = Math.max(1, e.maxX - e.minX), h = Math.max(1, e.maxY - e.minY);
+  const scale = Math.min((viewW - pad * 2) / w, (viewH - pad * 2) / h);
+  state.view.scale = Math.min(200, Math.max(0.05, scale));
+  state.view.offsetX = (viewW - (e.minX + e.maxX) * state.view.scale) / 2;
+  state.view.offsetY = (viewH - (e.minY + e.maxY) * state.view.scale) / 2;
+  draw(); updateZoomLabel();
+}
+
+function updateZoomLabel() {
+  document.getElementById('szoom').textContent = Math.round(state.view.scale / 2 * 100) + '%';
+}
+function updateStatusCounts() {
+  document.getElementById('scount').textContent = state.shapes.length;
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+}
+
+let toastTimer = null;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+// ---- SVG書き出し ----
+function exportSVG() {
+  const svg = buildSVGString();
+  if (!svg) { toast('表示中の図形がありません'); return; }
+  downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), 'drawing.svg');
+}
+// SVG文字列を生成（純関数・テスト容易化のため分離）
+function buildSVGString() {
+  const shapes = state.shapes.filter(isVisible); // 非表示レイヤーは除外
+  const e = computeExtent(shapes);
+  if (!e) return '';
+  const { minX, minY, maxX, maxY } = e;
+  const pad = 10;
+  const W = (maxX - minX) + pad * 2, H = (maxY - minY) + pad * 2;
+  const ox = minX - pad, oy = minY - pad;
+  let body = '';
+  const esc = v => (+v).toFixed(2);
+  for (const s of shapes) {
+    // 属性へ入れる値は色を検証し線幅は数値化(壊れたデータでの属性インジェクション防止)
+    const st = safeColor(s.stroke, '#000'), sw = (+s.strokeWidth || 1), fl = safeColor(s.fill, 'none');
+    // 回転図形はグループに rotate transform を付与
+    let gOpen = '', gClose = '';
+    if (s.rot) {
+      const c = shapeCenter(s);
+      gOpen = `<g transform="rotate(${(s.rot * 180 / Math.PI).toFixed(3)} ${esc(c.x - ox)} ${esc(c.y - oy)})">`;
+      gClose = '</g>\n';
+    }
+    body += gOpen;
+    if (s.type === 'line' || s.type === 'dim') {
+      body += `<line x1="${esc(s.x1 - ox)}" y1="${esc(s.y1 - oy)}" x2="${esc(s.x2 - ox)}" y2="${esc(s.y2 - oy)}" stroke="${st}" stroke-width="${sw}"/>\n`;
+      if (s.type === 'dim') {
+        const d = Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(1);
+        body += `<text x="${esc((s.x1 + s.x2) / 2 - ox)}" y="${esc((s.y1 + s.y2) / 2 - oy - 3)}" fill="${st}" font-size="10" text-anchor="middle">${d} mm</text>\n`;
+      }
+    } else if (s.type === 'rect') {
+      body += `<rect x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" width="${esc(s.w)}" height="${esc(s.h)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"/>\n`;
+    } else if (s.type === 'circle') {
+      body += `<circle cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" r="${esc(s.r)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"/>\n`;
+    } else if (s.type === 'polyline') {
+      const pts = s.points.map(p => `${esc(p.x - ox)},${esc(p.y - oy)}`).join(' ');
+      const tag = s.closed ? 'polygon' : 'polyline';
+      body += `<${tag} points="${pts}" stroke="${st}" stroke-width="${sw}" fill="${s.closed ? fl : 'none'}"/>\n`;
+    } else if (s.type === 'text') {
+      const xe = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      body += `<text x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" fill="${st}" font-size="${esc(s.fontSize || 16)}" font-family="sans-serif" dominant-baseline="text-before-edge">${xe(s.text || '')}</text>\n`;
+    }
+    body += gClose;
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${esc(W)}mm" height="${esc(H)}mm" viewBox="0 0 ${esc(W)} ${esc(H)}">\n<rect width="100%" height="100%" fill="white"/>\n${body}</svg>`;
+}
+
+// ---- PNG書き出し（現在ビューを白背景で）----
+function exportPNG() {
+  const off = document.createElement('canvas');
+  off.width = cv.width; off.height = cv.height;
+  const c = off.getContext('2d');
+  // 白背景に現在のキャンバス内容を重ねる
+  c.fillStyle = '#ffffff'; c.fillRect(0, 0, off.width, off.height);
+  c.drawImage(cv, 0, 0, off.width, off.height);
+  off.toBlob(b => downloadBlob(b, 'drawing.png'));
+}
+
+// ---- PDF書き出し（実寸・依存なし。SVGを高解像度ラスタライズしFlateで埋め込み）----
+function drawingExtentMM() {
+  const e = computeExtent(state.shapes.filter(isVisible));
+  if (!e) return null;
+  const pad = 5;
+  return { Wmm: (e.maxX - e.minX) + pad * 2, Hmm: (e.maxY - e.minY) + pad * 2 };
+}
+async function deflate(bytes) {
+  if (typeof CompressionStream === 'undefined') return null;
+  const cs = new CompressionStream('deflate');
+  const w = cs.writable.getWriter();
+  const done = w.write(bytes).then(() => w.close()); // backpressure安全のため待つ
+  const ab = await new Response(cs.readable).arrayBuffer();
+  await done;
+  return new Uint8Array(ab);
+}
+async function buildPDFBlob() {
+  const ext = drawingExtentMM();
+  if (!ext) return null;
+  const { Wmm, Hmm } = ext;
+  // SVGを画像化して高解像度キャンバスへ描画(日本語テキストもブラウザが描く)
+  const svg = buildSVGString();
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+  const pxPerMM = 8;
+  const iw = Math.max(1, Math.round(Wmm * pxPerMM)), ih = Math.max(1, Math.round(Hmm * pxPerMM));
+  const ic = document.createElement('canvas'); ic.width = iw; ic.height = ih;
+  const ictx = ic.getContext('2d');
+  ictx.fillStyle = '#fff'; ictx.fillRect(0, 0, iw, ih);
+  ictx.drawImage(img, 0, 0, iw, ih);
+  // RGBA→白合成RGB
+  const data = ictx.getImageData(0, 0, iw, ih).data;
+  const rgb = new Uint8Array(iw * ih * 3);
+  for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
+    const a = data[i + 3] / 255;
+    rgb[j] = Math.round(data[i] * a + 255 * (1 - a));
+    rgb[j + 1] = Math.round(data[i + 1] * a + 255 * (1 - a));
+    rgb[j + 2] = Math.round(data[i + 2] * a + 255 * (1 - a));
+  }
+  const deflated = await deflate(rgb);
+  const useFlate = !!deflated;
+  const imgBytes = deflated || rgb;
+  const filter = useFlate ? '/FlateDecode' : '/ASCIIHexDecode'; // CompressionStream無い環境向けの保険
+  const imgPayload = useFlate ? imgBytes : new TextEncoder().encode([...rgb].map(b => b.toString(16).padStart(2, '0')).join('') + '>');
+
+  const mm2pt = 72 / 25.4;
+  const pw = (Wmm * mm2pt).toFixed(2), ph = (Hmm * mm2pt).toFixed(2);
+
+  // PDFをバイナリ連結で組み立て(xref厳密オフセット)
+  const enc = s => new TextEncoder().encode(s);
+  const chunks = []; let len = 0; const offsets = [];
+  const push = (u8) => { chunks.push(u8); len += u8.length; };
+  const obj = (i, body) => { offsets[i] = len; push(enc(`${i} 0 obj\n${body}\nendobj\n`)); };
+
+  push(enc('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'));
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>`);
+  const content = `q\n${pw} 0 0 ${ph} 0 0 cm\n/Im0 Do\nQ\n`;
+  obj(4, `<< /Length ${enc(content).length} >>\nstream\n${content}endstream`);
+  // 画像XObject(バイナリ)
+  offsets[5] = len;
+  push(enc(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${iw} /Height ${ih} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter ${filter} /Length ${imgPayload.length} >>\nstream\n`));
+  push(imgPayload);
+  push(enc('\nendstream\nendobj\n'));
+
+  const xrefStart = len;
+  let xref = `xref\n0 6\n0000000000 65535 f \n`;
+  for (let i = 1; i <= 5; i++) xref += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+  push(enc(xref));
+  push(enc(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`));
+
+  let total = new Uint8Array(len), pos = 0;
+  for (const c of chunks) { total.set(c, pos); pos += c.length; }
+  return new Blob([total], { type: 'application/pdf' });
+}
+async function exportPDF() {
+  const blob = await buildPDFBlob();
+  if (!blob) { toast('図形がありません'); return; }
+  downloadBlob(blob, 'drawing.pdf');
+}
+
+// ---- localStorage 自動保存 ----
+const LS_KEY = 'simplecad.autosave.v1';
+let saveTimer = null;
+function autosave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ shapes: state.shapes, view: state.view, nextId, layers: state.layers, activeLayer: state.activeLayer, nextLayerId })); } catch (e) {}
+  }, 400);
+}
+function loadAutosave() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return false;
+    const o = safeParse(raw);
+    if (!Array.isArray(o.shapes)) return false;
+    state.shapes = sanitizeShapes(o.shapes);
+    const v = safeView(o.view); if (v) state.view = v;
+    if (isNum(o.nextId)) nextId = +o.nextId;
+    const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls;
+    if (o.activeLayer) state.activeLayer = String(o.activeLayer);
+    if (isNum(o.nextLayerId)) nextLayerId = +o.nextLayerId;
+    return true;
+  } catch (e) { return false; }
+}
+
+// =========================================================================
+// 起動
+// =========================================================================
+function init() {
+  resize();
+  const restored = loadAutosave();
+  if (!restored) {
+    // 初期ビューを画面中央に
+    state.view.offsetX = viewW / 2; state.view.offsetY = viewH / 2;
+  }
+  ensureLayers();
+  updateZoomLabel();
+  resetHistory();
+  document.getElementById('sgrid').textContent = state.grid.step + 'mm';
+  draw();
+}
+// デバッグ/テスト用API（自動テストから内部状態へアクセスするため公開。実害なし）
+window.SimpleCAD = {
+  state, draw, fitView, undo, redo,
+  buildSVGString,
+  buildPDFBlob,
+  exportPNG,
+  hitTest, resolvePoint,
+  setTool: (t) => { const b = document.querySelector(`.tool[data-tool="${t}"]`); if (b) b.click(); },
+  shapeCount: () => state.shapes.length,
+  clearAll: () => { state.shapes = []; state.selection.clear(); nextId = 1; resetHistory(); draw(); },
+  commitPoly,
+  addShape: (sh) => { if (!sh.layer) sh.layer = state.activeLayer; state.shapes.push(sh); pushHistory(); draw(); },
+  select: (id) => { state.selection.clear(); if (id) state.selection.add(id); draw(); },
+  layerAPI: { add: addLayer, del: deleteLayer, moveSel: moveSelectionToActive, render: renderLayers, toggle: toggleLayers, ensure: ensureLayers },
+  transformAPI: { handleGeom, scaleShapeAbout, shapeExtent, shapeCenter },
+  loadJSON: (o) => { state.shapes = sanitizeShapes(o.shapes); const v = safeView(o.view); if (v) state.view = v; const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls; if (o.activeLayer) state.activeLayer = String(o.activeLayer); ensureLayers(); resetHistory(); draw(); },
+  dumpJSON: () => JSON.parse(JSON.stringify({ shapes: state.shapes, view: state.view, layers: state.layers, activeLayer: state.activeLayer })),
+};
+
+// レイアウト確定後に初期化
+requestAnimationFrame(init);
+</script>
+</body>
+</html>
