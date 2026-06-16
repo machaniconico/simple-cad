@@ -578,7 +578,31 @@ function snapToObjects(w) {
       }
     }
   }
+  // 交点スナップ: カーソル近傍の線分同士の交点に吸着(回転は実world座標化してから判定)
+  // near は上限付き(密な図面でも総当たりO(k^2)が暴走しないよう抑制。スナップは最善努力で可)
+  const near = [], NEAR_CAP = 48;
+  for (const s of state.shapes) {
+    if (near.length >= NEAR_CAP) break;
+    if (!isVisible(s)) continue;
+    const tw = s.rot ? (() => { const c = shapeCenter(s); return (x, y) => rotatePt(x, y, c.x, c.y, s.rot); })() : (x, y) => ({ x, y });
+    const segs = [];
+    if (s.type === 'line' || s.type === 'dim') { const a = tw(s.x1, s.y1), b = tw(s.x2, s.y2); segs.push([a.x, a.y, b.x, b.y]); }
+    else if (s.type === 'rect') { const c = [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]].map(([x, y]) => tw(x, y)); for (let i = 0; i < 4; i++) { const a = c[i], b = c[(i + 1) % 4]; segs.push([a.x, a.y, b.x, b.y]); } }
+    else if (s.type === 'polyline') { const p = s.points.map(q => tw(q.x, q.y)); for (let i = 0; i < p.length - 1; i++) segs.push([p[i].x, p[i].y, p[i + 1].x, p[i + 1].y]); if (s.closed && p.length > 2) { const a = p[p.length - 1], b = p[0]; segs.push([a.x, a.y, b.x, b.y]); } }
+    else if (s.type === 'angle') { const v = tw(s.vx, s.vy), p1 = tw(s.x1, s.y1), p2 = tw(s.x2, s.y2); segs.push([v.x, v.y, p1.x, p1.y], [v.x, v.y, p2.x, p2.y]); }
+    for (const sg of segs) if (distToSeg(w.x, w.y, sg[0], sg[1], sg[2], sg[3]) < thr * 3) near.push(sg);
+  }
+  for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const p = segIntersect(near[i], near[j]); if (p) considerRaw(p.x, p.y); }
   return best;
+}
+// 線分どうしの交点(両線分内のみ)。平行・線分外はnull
+function segIntersect(s1, s2) {
+  const ax = s1[0], ay = s1[1], bx = s1[2], by = s1[3], cx = s2[0], cy = s2[1], dx = s2[2], dy = s2[3];
+  const r1 = bx - ax, r2 = by - ay, s3 = dx - cx, s4 = dy - cy;
+  const den = r1 * s4 - r2 * s3; if (Math.abs(den) < 1e-9) return null;
+  const t = ((cx - ax) * s4 - (cy - ay) * s3) / den, u = ((cx - ax) * r2 - (cy - ay) * r1) / den;
+  if (t < -1e-6 || t > 1 + 1e-6 || u < -1e-6 || u > 1 + 1e-6) return null;
+  return { x: ax + t * r1, y: ay + t * r2 };
 }
 // 入力点(screen)→確定world点（端点スナップ優先、なければグリッド）
 function resolvePoint(sx, sy) {

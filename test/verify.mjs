@@ -1326,6 +1326,19 @@ const layerDedup = await page.evaluate(() => {
 });
 check('重複layer idは一意化される', layerDedup.unique && layerDedup.ids.length === 3, JSON.stringify(layerDedup));
 
+// --- BW: 交点スナップ(端点/中点と一致しない交点) ---
+const interRes = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.grid.osnap = true; window.SimpleCAD.state.grid.snap = false;
+  // 水平線(0,0)-(20,0) と 縦線(4,-3)-(4,9) は (4,0) で交差(どちらの端点・中点とも非一致)
+  window.SimpleCAD.addShape({ id: 'lh', type: 'line', x1: 0, y1: 0, x2: 20, y2: 0, stroke: '#000', strokeWidth: 1 });
+  window.SimpleCAD.addShape({ id: 'lv', type: 'line', x1: 4, y1: -3, x2: 4, y2: 9, stroke: '#000', strokeWidth: 1 });
+  const v = window.SimpleCAD.state.view;
+  const r = window.SimpleCAD.resolvePoint(4 * v.scale + v.offsetX + 2, 0 * v.scale + v.offsetY + 2);
+  return r;
+});
+check('交差する2線分の交点(4,0)に吸着', Math.abs(interRes.x - 4) < 0.8 && Math.abs(interRes.y - 0) < 0.8, JSON.stringify(interRes));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
