@@ -172,11 +172,13 @@
     <div class="group">
       <button class="tbtn" id="btnSave" title="JSON保存">💾 保存</button>
       <button class="tbtn" id="btnLoad" title="JSON読込">📂 読込</button>
+      <button class="tbtn" id="btnImg" title="画像を配置(トレース用)">🖼 画像</button>
       <button class="tbtn" id="btnSvg" title="SVG書き出し">SVG</button>
       <button class="tbtn" id="btnPng" title="PNG書き出し">PNG</button>
       <button class="tbtn" id="btnPdf" title="PDF書き出し(実寸)">PDF</button>
     </div>
     <input type="file" id="fileInput" accept="application/json,.json" style="display:none">
+    <input type="file" id="imgInput" accept="image/*" style="display:none">
   </div>
 
   <!-- 本体 -->
@@ -484,6 +486,10 @@ function sanitizeShape(s) {
       return { ...base, type: 'polyline', closed: !!s.closed, points: s.points.map(p => ({ x: num(p && p.x), y: num(p && p.y) })) };
     case 'text':
       return { ...base, type: 'text', x: num(s.x), y: num(s.y), fontSize: Math.max(1, num(s.fontSize, 16)), text: String(s.text == null ? '' : s.text).slice(0, 5000) };
+    case 'image':
+      // srcは data:image/ のみ許可(XSS防止)
+      if (!/^data:image\//.test(String(s.src || ''))) return null;
+      return { ...base, type: 'image', x: num(s.x), y: num(s.y), w: Math.max(0, num(s.w)), h: Math.max(0, num(s.h)), src: String(s.src), opacity: Math.min(1, Math.max(0, num(s.opacity, 1))) };
     default:
       return null;
   }
@@ -564,6 +570,21 @@ function drawGrid() {
   ctx.stroke();
 }
 
+// 画像要素キャッシュ(src→Image)。未ロードならロードして完了時に再描画
+const imgCache = new Map();
+function getImg(src) {
+  if (!src) return null;
+  let img = imgCache.get(src);
+  if (!img) {
+    img = new Image();
+    img.onload = () => draw();
+    img.onerror = () => {};
+    img.src = src;
+    imgCache.set(src, img);
+  }
+  return img;
+}
+
 function applyStyle(s) {
   ctx.strokeStyle = s.stroke || '#38bdf8';
   ctx.lineWidth = (s.strokeWidth || 2);
@@ -610,6 +631,19 @@ function drawShape(s, selected) {
     ctx.font = (s.fontSize * state.view.scale) + 'px system-ui, "Noto Sans JP", sans-serif';
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText(s.text || '', W2Sx(s.x), W2Sy(s.y));
+  } else if (s.type === 'image') {
+    const img = getImg(s.src);
+    if (img && img.complete && img.naturalWidth) {
+      ctx.save();
+      ctx.globalAlpha = s.opacity == null ? 1 : s.opacity;
+      ctx.drawImage(img, W2Sx(s.x), W2Sy(s.y), s.w * state.view.scale, s.h * state.view.scale);
+      ctx.restore();
+    } else {
+      // 読み込み中はプレースホルダ枠
+      ctx.strokeStyle = '#475569'; ctx.setLineDash([4, 4]);
+      ctx.strokeRect(W2Sx(s.x), W2Sy(s.y), s.w * state.view.scale, s.h * state.view.scale);
+      ctx.setLineDash([]);
+    }
   }
   if (hasRot) ctx.restore();
   if (selected) drawSelectionDecor(s);
@@ -762,9 +796,10 @@ function fieldsFor(s) {
   if (s.type === 'circle') return [['cx', '中心X'], ['cy', '中心Y'], ['r', '半径']];
   if (s.type === 'ellipse') return [['cx', '中心X'], ['cy', '中心Y'], ['rx', '横半径'], ['ry', '縦半径']];
   if (s.type === 'text') return [['x', 'X'], ['y', 'Y'], ['fontSize', '字高']];
+  if (s.type === 'image') return [['x', 'X'], ['y', 'Y'], ['w', '幅'], ['h', '高さ'], ['opacity', '不透明度']];
   return null;
 }
-const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', ellipse: '楕円', polyline: 'ポリライン', text: 'テキスト' }[t] || t);
+const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', ellipse: '楕円', polyline: 'ポリライン', text: 'テキスト', image: '画像' }[t] || t);
 
 // 選択が変わったら再構築、同じならば値だけ同期（フォーカス中の欄は触らない）
 function updateNumPanel() {
@@ -797,11 +832,16 @@ function buildNumPanel(s, fields) {
   for (const [key, label] of fields) {
     const row = document.createElement('label');
     const inp = document.createElement('input');
-    inp.type = 'number'; inp.step = '1'; inp.dataset.k = key; inp.value = (+s[key]).toFixed(2);
+    inp.type = 'number'; inp.step = key === 'opacity' ? '0.1' : '1'; inp.dataset.k = key; inp.value = (+s[key]).toFixed(2);
     inp.addEventListener('input', () => {
       const cur = selectedShape(); if (!cur) return;
       const v = parseFloat(inp.value);
-      if (!isNaN(v)) { cur[key] = key === 'r' ? Math.max(0, v) : key === 'fontSize' ? Math.max(0.1, v) : v; draw(); }
+      if (!isNaN(v)) {
+        cur[key] = key === 'r' ? Math.max(0, v)
+          : key === 'fontSize' ? Math.max(0.1, v)
+          : key === 'opacity' ? Math.min(1, Math.max(0, v)) : v;
+        draw();
+      }
     });
     inp.addEventListener('change', () => { pushHistory(); });
     row.append(document.createTextNode(label + ' '), inp);
@@ -848,6 +888,7 @@ function bbox(s) {
     const sz = textSize(s);
     return { x: s.x, y: s.y, w: sz.w, h: sz.h };
   }
+  if (s.type === 'image') return { x: s.x, y: s.y, w: s.w, h: s.h };
   return null;
 }
 // テキストの実寸(world mm)。フォントをmm単位で設定し測定（線形なので倍率不要）
@@ -893,7 +934,7 @@ function hitTest(wx, wy) {
       for (let k = 0; k < p.length - 1; k++)
         if (distToSeg(qx, qy, p[k].x, p[k].y, p[k + 1].x, p[k + 1].y) < thr) return s;
       if (s.closed && p.length > 1 && distToSeg(qx, qy, p[p.length - 1].x, p[p.length - 1].y, p[0].x, p[0].y) < thr) return s;
-    } else if (s.type === 'text') {
+    } else if (s.type === 'text' || s.type === 'image') {
       const b = bbox(s);
       if (qx >= b.x - thr && qx <= b.x + b.w + thr && qy >= b.y - thr && qy <= b.y + b.h + thr) return s;
     }
@@ -942,7 +983,7 @@ function scaleShapeAbout(s, ax, ay, sx, sy) {
   if (s.type === 'line' || s.type === 'dim') {
     const p1 = f(s.x1, s.y1), p2 = f(s.x2, s.y2);
     s.x1 = p1.x; s.y1 = p1.y; s.x2 = p2.x; s.y2 = p2.y;
-  } else if (s.type === 'rect') {
+  } else if (s.type === 'rect' || s.type === 'image') {
     const p1 = f(s.x, s.y), p2 = f(s.x + s.w, s.y + s.h);
     s.x = Math.min(p1.x, p2.x); s.y = Math.min(p1.y, p2.y);
     s.w = Math.abs(p2.x - p1.x); s.h = Math.abs(p2.y - p1.y);
@@ -966,7 +1007,7 @@ function translateShape(s, dx, dy) {
   else if (s.type === 'rect') { s.x += dx; s.y += dy; }
   else if (s.type === 'circle') { s.cx += dx; s.cy += dy; }
   else if (s.type === 'ellipse') { s.cx += dx; s.cy += dy; }
-  else if (s.type === 'text') { s.x += dx; s.y += dy; }
+  else if (s.type === 'text' || s.type === 'image') { s.x += dx; s.y += dy; }
   else if (s.type === 'polyline') for (const p of s.points) { p.x += dx; p.y += dy; }
 }
 
@@ -1496,6 +1537,31 @@ document.getElementById('btnSvg').onclick = exportSVG;
 document.getElementById('btnPng').onclick = exportPNG;
 document.getElementById('btnPdf').onclick = exportPDF;
 
+// 画像配置(トレース用): 画像を読み込み、ビュー中央に実寸配置
+document.getElementById('btnImg').onclick = () => document.getElementById('imgInput').click();
+document.getElementById('imgInput').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const src = rd.result;
+    const img = new Image();
+    img.onload = () => {
+      // ビュー幅の約6割に収まるよう初期サイズ(world mm)を決定
+      const targetW = (viewW * 0.6) / state.view.scale;
+      const scale = Math.min(1, targetW / img.naturalWidth);
+      const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+      const cx = S2Wx(viewW / 2), cy = S2Wy(viewH / 2);
+      imgCache.set(src, img);
+      state.shapes.push({ id: uid(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, src, opacity: 1, layer: state.activeLayer });
+      pushHistory(); draw();
+    };
+    img.onerror = () => toast('画像の読み込みに失敗');
+    img.src = src;
+  };
+  rd.readAsDataURL(f);
+  e.target.value = '';
+};
+
 // ===== クリップボード / 複製 / 微動 / 全選択 =====
 let clipboard = [];
 function selectedShapesList() {
@@ -1758,6 +1824,11 @@ function buildSVGString() {
     } else if (s.type === 'text') {
       const xe = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       body += `<text x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" fill="${st}" font-size="${esc(s.fontSize || 16)}" font-family="sans-serif" dominant-baseline="text-before-edge">${xe(s.text || '')}</text>\n`;
+    } else if (s.type === 'image') {
+      // data: 画像のみ埋め込む(他URLは安全のため出力しない)
+      if (/^data:image\//.test(s.src || '')) {
+        body += `<image x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" width="${esc(s.w)}" height="${esc(s.h)}" opacity="${(+s.opacity || 1)}" href="${s.src}" preserveAspectRatio="none"/>\n`;
+      }
     }
     body += gClose;
   }

@@ -583,6 +583,30 @@ check('リロードでグリッド設定が復元', prefs.snap === false && pref
 check('リロードで線色設定が復元', prefs.stroke === '#ff8800', 'stroke=' + prefs.stroke);
 check('復元した設定がUIにも反映', prefs.uiStep === '50' && prefs.uiStroke === '#ff8800', JSON.stringify({ uiStep: prefs.uiStep, uiStroke: prefs.uiStroke }));
 
+// --- Y: 背景画像(トレース用) ---
+// 1x1 透明PNG(data URL)
+const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+await page.evaluate((src) => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'im1', type: 'image', x: 10, y: 10, w: 100, h: 80, src, opacity: 0.5, layer: window.SimpleCAD.state.activeLayer });
+}, PNG1);
+const im = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'image'));
+check('画像図形が配置される', !!im && im.w === 100 && im.opacity === 0.5, JSON.stringify(im && { w: im.w, op: im.opacity }));
+// SVGに<image>(data URL)が埋め込まれる
+const svgIm = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('SVGに<image data:url>が埋め込まれる', svgIm.includes('<image') && svgIm.includes('data:image/'), svgIm.slice(0, 60));
+// 非data URL(javascript:等)はサニタイズで除外
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.loadJSON({ shapes: [{ type: 'image', x: 0, y: 0, w: 10, h: 10, src: 'javascript:alert(1)' }] }); });
+const badImgCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('不正src(非data:)の画像は除外される', badImgCnt === 0, 'count=' + badImgCnt);
+// 保存読込で画像が復元される
+await page.evaluate((src) => { window.SimpleCAD.clearAll(); window.SimpleCAD.addShape({ id: 'im2', type: 'image', x: 0, y: 0, w: 50, h: 40, src, opacity: 1, layer: window.SimpleCAD.state.activeLayer }); }, PNG1);
+const dImg = await page.evaluate(() => window.SimpleCAD.dumpJSON());
+await page.evaluate(() => window.SimpleCAD.clearAll());
+await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dImg);
+const imR = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'image'));
+check('画像が保存読込で復元される', !!imR && imR.w === 50, JSON.stringify(imR && imR.w));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
