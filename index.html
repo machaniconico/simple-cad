@@ -579,6 +579,7 @@ function safeParse(str) {
 // =========================================================================
 function draw() {
   ctx.clearRect(0, 0, viewW, viewH);
+  ctx.setLineDash([]); // フレーム冒頭で破線状態をリセット(グリッド/ハンドルへの漏れ防止)
   if (state.grid.show) drawGrid();
   for (const s of state.shapes) { if (!isVisible(s)) continue; drawShape(s, state.selection.has(s.id)); }
   // 単一選択かつ選択ツール時のみ変形ハンドル
@@ -706,6 +707,7 @@ function drawShape(s, selected) {
     }
   }
   if (hasRot) ctx.restore();
+  ctx.setLineDash([]); // 図形ごとに破線状態を後始末(ハンドル/後続描画への漏れ防止)
   if (selected) drawSelectionDecor(s);
 }
 
@@ -1522,9 +1524,9 @@ SWATCH_COLORS.forEach(col => {
     state.style.stroke = col;
     document.getElementById('pStroke').value = col;
     if (state.selection.size) {
-      for (const id of state.selection) { const s = state.shapes.find(x => x.id === id); if (s && s.type !== 'image') s.stroke = col; }
+      for (const id of state.selection) { const s = state.shapes.find(x => x.id === id); if (s && s.type !== 'image' && s.type !== 'dim') s.stroke = col; }
       pushHistory(); draw();
-    }
+    } else { autosave(); }
   };
   swatchesEl.appendChild(b);
 });
@@ -1533,16 +1535,16 @@ const pStroke = document.getElementById('pStroke');
 const pFill = document.getElementById('pFill');
 const pFillOn = document.getElementById('pFillOn');
 const pWidth = document.getElementById('pWidth');
-pStroke.oninput = () => state.style.stroke = pStroke.value;
-function updFill() { state.style.fill = pFillOn.checked ? pFill.value : null; }
+pStroke.oninput = () => { state.style.stroke = pStroke.value; autosave(); };
+function updFill() { state.style.fill = pFillOn.checked ? pFill.value : null; autosave(); }
 pFill.oninput = updFill; pFillOn.onchange = updFill;
-pWidth.oninput = () => { state.style.strokeWidth = parseFloat(pWidth.value); document.getElementById('pWidthVal').textContent = pWidth.value; };
+pWidth.oninput = () => { state.style.strokeWidth = parseFloat(pWidth.value); document.getElementById('pWidthVal').textContent = pWidth.value; autosave(); };
 const pFont = document.getElementById('pFont');
-pFont.oninput = () => { const v = parseFloat(pFont.value); if (!isNaN(v) && v > 0) state.style.fontSize = v; };
+pFont.oninput = () => { const v = parseFloat(pFont.value); if (!isNaN(v) && v > 0) state.style.fontSize = v; autosave(); };
 const pSides = document.getElementById('pSides');
-pSides.oninput = () => { const v = parseInt(pSides.value); if (!isNaN(v)) state.style.sides = Math.min(60, Math.max(3, v)); };
+pSides.oninput = () => { const v = parseInt(pSides.value); if (!isNaN(v)) state.style.sides = Math.min(60, Math.max(3, v)); autosave(); };
 const pDash = document.getElementById('pDash');
-pDash.onchange = () => { state.style.dash = pDash.value; };
+pDash.onchange = () => { state.style.dash = pDash.value; autosave(); };
 
 document.getElementById('cGrid').onchange = e => { state.grid.show = e.target.checked; draw(); };
 document.getElementById('cSnap').onchange = e => { state.grid.snap = e.target.checked; };

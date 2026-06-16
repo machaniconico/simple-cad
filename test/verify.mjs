@@ -708,6 +708,20 @@ await page.evaluate(() => {
 const swStroke = await page.evaluate(() => ({ shape: window.SimpleCAD.state.shapes[0].stroke, style: window.SimpleCAD.state.style.stroke }));
 check('スウォッチで選択図形と既定色が変わる', swStroke.shape === '#ef4444' && swStroke.style === '#ef4444', JSON.stringify(swStroke));
 
+// --- AF: 破線がフレーム間で漏れない ---
+const dashLeak = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  // 最前面に非選択の破線矩形を置く
+  window.SimpleCAD.addShape({ id: 'dl', type: 'rect', x: 10, y: 10, w: 50, h: 40, stroke: '#000', strokeWidth: 1, fill: null, dash: 'dashed' });
+  window.SimpleCAD.state.selection.clear();
+  window.SimpleCAD.draw();
+  // draw直後、コンテキストの破線がリセットされているか
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  return ctx.getLineDash().length;
+});
+check('描画後にcanvasの破線状態がリセットされる', dashLeak === 0, 'lineDash=' + dashLeak);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
