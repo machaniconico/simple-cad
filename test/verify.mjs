@@ -401,6 +401,40 @@ await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.layerA
 const nlBefore = await page.evaluate(() => window.SimpleCAD.dumpJSON().layers.length);
 check('レイヤー2つ追加で計3', nlBefore === 3, 'layers=' + nlBefore);
 
+// --- Q: 複数選択(範囲ドラッグ/Shiftトグル) ---
+// 左ツールパレット/右プロパティを避けるため offset0・中央寄りの座標で操作
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 };
+  window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.setTool('select');
+  window.SimpleCAD.addShape({ id: 'm1', type: 'rect', x: 60, y: 60, w: 40, h: 30, stroke: '#fff', strokeWidth: 2, fill: null });
+  window.SimpleCAD.addShape({ id: 'm2', type: 'circle', cx: 160, cy: 90, r: 15, stroke: '#fff', strokeWidth: 2, fill: null });
+  window.SimpleCAD.addShape({ id: 'm3', type: 'rect', x: 300, y: 250, w: 20, h: 20, stroke: '#fff', strokeWidth: 2, fill: null });
+});
+const toVp = (wx, wy) => ({ x: box.x + wx * 2, y: box.y + wy * 2 });
+// world(50,50)〜(220,130) を覆う範囲ドラッグ → m1,m2が入りm3は外
+let a = toVp(50, 50), b2 = toVp(220, 130);
+await page.mouse.move(a.x, a.y); await page.mouse.down();
+await page.mouse.move((a.x + b2.x) / 2, (a.y + b2.y) / 2, { steps: 3 }); await page.mouse.move(b2.x, b2.y, { steps: 3 }); await page.mouse.up();
+let selN = await page.evaluate(() => window.SimpleCAD.state.selection.size);
+check('範囲ドラッグで2図形選択', selN === 2, 'sel=' + selN);
+const selHas = await page.evaluate(() => ({ m1: window.SimpleCAD.state.selection.has('m1'), m2: window.SimpleCAD.state.selection.has('m2'), m3: window.SimpleCAD.state.selection.has('m3') }));
+check('範囲内のm1/m2のみ選択、m3は非選択', selHas.m1 && selHas.m2 && !selHas.m3, JSON.stringify(selHas));
+// Shiftクリックでm3を追加(塗り無し矩形は辺上をクリック: 左辺 world x=300)
+const m3vp = toVp(300, 260);
+await page.keyboard.down('Shift');
+await page.mouse.click(m3vp.x, m3vp.y);
+await page.keyboard.up('Shift');
+selN = await page.evaluate(() => window.SimpleCAD.state.selection.size);
+check('Shiftクリックでm3を追加し計3', selN === 3, 'sel=' + selN);
+// 複数選択をまとめて移動(m1の左辺 world x=60 を掴む)
+const c1 = toVp(60, 75);
+await page.mouse.move(c1.x, c1.y); await page.mouse.down();
+await page.mouse.move(c1.x + 40, c1.y + 20, { steps: 3 }); await page.mouse.move(c1.x + 80, c1.y + 40, { steps: 3 }); await page.mouse.up();
+const moved = await page.evaluate(() => window.SimpleCAD.state.shapes.find(x => x.id === 'm2').cx !== 160);
+check('複数選択をまとめて移動できる', moved, 'm2移動=' + moved);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

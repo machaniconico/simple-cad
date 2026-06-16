@@ -299,6 +299,8 @@ let draft = null;          // 線/矩形/円/寸法の作図中データ
 let polyPts = null;        // ポリライン作図中の点列
 let dragMove = null;       // 選択移動中 {ids, startWorld, orig:Map}
 let handleDrag = null;     // 変形(リサイズ/回転)中
+let marquee = null;        // 範囲選択ドラッグ {x0,y0,x1,y1(world), add}
+let pointerShift = false;  // 直近pointerdownのShift状態
 let snapMarker = null;     // スナップ表示位置(world)
 
 // 履歴（lastSnapshot = 現在コミット済み状態。pushHistoryは「変更前」状態をundoへ積む）
@@ -489,6 +491,7 @@ function draw() {
   }
   if (draft) drawDraft();
   if (polyPts) drawPolyDraft();
+  if (marquee) drawMarquee();
   if (snapMarker) drawSnapMarker(snapMarker);
   updateStatusCounts();
   updateNumPanel();
@@ -666,6 +669,15 @@ function drawPolyDraft() {
   ctx.beginPath(); ctx.arc(W2Sx(p[0].x), W2Sy(p[0].y), 9, 0, 7); ctx.stroke();
 }
 
+function drawMarquee() {
+  const x = W2Sx(Math.min(marquee.x0, marquee.x1)), y = W2Sy(Math.min(marquee.y0, marquee.y1));
+  const w = Math.abs(marquee.x1 - marquee.x0) * state.view.scale, h = Math.abs(marquee.y1 - marquee.y0) * state.view.scale;
+  ctx.save();
+  ctx.fillStyle = 'rgba(56,189,248,0.12)';
+  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+  ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+}
 function drawSnapMarker(w) {
   const x = W2Sx(w.x), y = W2Sy(w.y);
   ctx.save();
@@ -916,10 +928,11 @@ cv.addEventListener('pointerdown', e => {
   const p = getXY(e);
   pointers.set(e.pointerId, p);
   downScreen = p;
+  pointerShift = e.shiftKey;
 
   if (pointers.size === 2) {
     // ピンチ開始：作図途中ならドラフト破棄
-    draft = null; dragMove = null;
+    draft = null; dragMove = null; marquee = null;
     const [a, b] = [...pointers.values()];
     pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
     return;
@@ -974,7 +987,7 @@ function endPointer(e) {
   onToolUp(getXY(e));
 }
 cv.addEventListener('pointerup', endPointer);
-cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinch = null; panning = false; draft = null; });
+cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinch = null; panning = false; draft = null; marquee = null; });
 
 // ホイールズーム
 cv.addEventListener('wheel', e => {
@@ -1010,15 +1023,24 @@ function onToolDown(p) {
     }
     const hit = hitTest(S2Wx(p.x), S2Wy(p.y));
     if (hit) {
+      if (pointerShift) {
+        // Shiftクリックで選択トグル(移動は開始しない)
+        if (state.selection.has(hit.id)) state.selection.delete(hit.id);
+        else state.selection.add(hit.id);
+        draw(); return;
+      }
       if (!state.selection.has(hit.id)) { state.selection.clear(); state.selection.add(hit.id); }
       const orig = new Map();
       for (const id of state.selection) {
         const s = state.shapes.find(x => x.id === id);
-        orig.set(id, JSON.parse(JSON.stringify(s)));
+        if (s) orig.set(id, JSON.parse(JSON.stringify(s)));
       }
       dragMove = { startWorld: { x: S2Wx(p.x), y: S2Wy(p.y) }, orig, moved: false };
     } else {
-      state.selection.clear();
+      // 空き場所ドラッグで範囲選択(Shiftなら追加)
+      if (!pointerShift) state.selection.clear();
+      const wx = S2Wx(p.x), wy = S2Wy(p.y);
+      marquee = { x0: wx, y0: wy, x1: wx, y1: wy, add: pointerShift };
     }
     draw(); return;
   }
@@ -1101,6 +1123,7 @@ function onToolMove(p) {
   const t = state.tool;
 
   if (handleDrag) { doHandleDrag(p); return; }
+  if (marquee) { marquee.x1 = S2Wx(p.x); marquee.y1 = S2Wy(p.y); draw(); return; }
   if (dragMove) {
     const wx = S2Wx(p.x), wy = S2Wy(p.y);
     let dx = wx - dragMove.startWorld.x, dy = wy - dragMove.startWorld.y;
@@ -1131,6 +1154,19 @@ function onToolUp(p) {
   if (handleDrag) {
     if (handleDrag.changed) pushHistory();
     handleDrag = null; return;
+  }
+  if (marquee) {
+    const rx0 = Math.min(marquee.x0, marquee.x1), ry0 = Math.min(marquee.y0, marquee.y1);
+    const rx1 = Math.max(marquee.x0, marquee.x1), ry1 = Math.max(marquee.y0, marquee.y1);
+    // 微小ドラッグ(=実質クリック)なら選択操作なし
+    if (Math.hypot(rx1 - rx0, ry1 - ry0) * state.view.scale >= 4) {
+      for (const s of state.shapes) {
+        if (!isVisible(s) || isLocked(s)) continue;
+        const b = shapeExtent(s); if (!b) continue;
+        if (b.x < rx1 && b.x + b.w > rx0 && b.y < ry1 && b.y + b.h > ry0) state.selection.add(s.id);
+      }
+    }
+    marquee = null; draw(); return;
   }
   if (dragMove) {
     if (dragMove.moved) pushHistory();
