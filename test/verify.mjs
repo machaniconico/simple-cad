@@ -843,6 +843,32 @@ await page.mouse.click(0 + 60 * 2, 51 + 70 * 2);
 const selSolo = await page.evaluate(() => window.SimpleCAD.state.selection.size);
 check('解除後は単体選択', selSolo === 1, 'sel=' + selSolo);
 
+// --- AM: グループ独立化 & 永続化(レビュー指摘) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'q1', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'q2', type: 'rect', x: 20, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.selectMany(['q1', 'q2']);
+  window.SimpleCAD.groupAPI.group();
+  window.SimpleCAD.editAPI.duplicate(); // 複製
+});
+const groupIds = await page.evaluate(() => [...new Set(window.SimpleCAD.state.shapes.map(s => s.group))]);
+check('複製でグループが分かれる(2グループ)', groupIds.length === 2, JSON.stringify(groupIds));
+// nextGroupIdが永続化され、リロード後に既存と衝突しない
+await page.evaluate(() => window.SimpleCAD.saveNow());
+await page.reload();
+await page.waitForFunction(() => window.SimpleCAD, null, { timeout: 5000 });
+await page.evaluate(() => {
+  // リロード後に新規グループを作る
+  window.SimpleCAD.addShape({ id: 'q3', type: 'rect', x: 50, y: 50, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'q4', type: 'rect', x: 70, y: 50, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.selectMany(['q3', 'q4']);
+  window.SimpleCAD.groupAPI.group();
+});
+const allGroups = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.group));
+const uniqueGroups = await page.evaluate(() => [...new Set(window.SimpleCAD.state.shapes.map(s => s.group))].length);
+check('リロード後の新グループが既存と衝突しない(3グループ)', uniqueGroups === 3, JSON.stringify({ allGroups: allGroups, u: uniqueGroups }));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

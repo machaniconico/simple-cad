@@ -408,6 +408,10 @@ function ensureLayers() {
   let mx = 1;
   for (const l of state.layers) { const n = parseInt(String(l.id).replace('L', '')); if (n >= mx) mx = n + 1; }
   if (nextLayerId < mx) nextLayerId = mx;
+  // グループIDも既存の最大値+1へ(復元/読込後の衝突防止)
+  let mg = 1;
+  for (const s of state.shapes) if (s.group) { const n = parseInt(String(s.group).replace('g', '')); if (n >= mg) mg = n + 1; }
+  if (nextGroupId < mg) nextGroupId = mg;
 }
 
 // 描画途中の一時状態
@@ -927,7 +931,7 @@ function measureInfo(s) {
   if (s.type === 'polyline') {
     const p = s.points; let len = 0;
     for (let i = 0; i < p.length - 1; i++) len += Math.hypot(p[i + 1].x - p[i].x, p[i + 1].y - p[i].y);
-    if (s.closed && p.length > 1) {
+    if (s.closed && p.length >= 3) {
       len += Math.hypot(p[0].x - p[p.length - 1].x, p[0].y - p[p.length - 1].y);
       let a = 0; for (let i = 0; i < p.length; i++) { const j = (i + 1) % p.length; a += p[i].x * p[j].y - p[j].x * p[i].y; }
       return '面積 ' + f1(Math.abs(a) / 2) + ' mm² / 周 ' + f1(len) + ' mm';
@@ -1276,12 +1280,13 @@ function onToolDown(p) {
       let duplicated = false;
       if (pointerAlt) {
         // Alt+ドラッグ: 選択を複製し、コピー側をドラッグ(原本は残す)
-        const newIds = [];
+        const newIds = [], newClones = [];
         for (const id of [...state.selection]) {
           const o = state.shapes.find(x => x.id === id); if (!o) continue;
           const ns = JSON.parse(JSON.stringify(o)); ns.id = uid();
-          state.shapes.push(ns); newIds.push(ns.id);
+          state.shapes.push(ns); newIds.push(ns.id); newClones.push(ns);
         }
+        remapGroups(newClones);
         if (newIds.length) { state.selection.clear(); newIds.forEach(i => state.selection.add(i)); duplicated = true; }
       }
       const orig = new Map();
@@ -1774,6 +1779,14 @@ let clipboard = [];
 function selectedShapesList() {
   return [...state.selection].map(id => state.shapes.find(s => s.id === id)).filter(Boolean);
 }
+// 複製した図形群のグループIDを新IDへ付け替え(原本グループと独立させる)
+function remapGroups(shapes) {
+  const map = new Map();
+  for (const s of shapes) if (s.group) {
+    if (!map.has(s.group)) map.set(s.group, 'g' + (nextGroupId++));
+    s.group = map.get(s.group);
+  }
+}
 function copySelection() {
   const list = selectedShapesList();
   if (list.length) clipboard = list.map(s => JSON.parse(JSON.stringify(s)));
@@ -1789,14 +1802,16 @@ function pasteClipboard() {
   if (!clipboard.length) return;
   const off = state.grid.step || 10;
   state.selection.clear();
+  const added = [];
   for (const c of clipboard) {
     const ns = sanitizeShape(JSON.parse(JSON.stringify(c)));
     if (!ns) continue;
     ns.id = uid();
     if (!getLayer(ns.layer)) ns.layer = state.activeLayer;
     translateShape(ns, off, off);
-    state.shapes.push(ns); state.selection.add(ns.id);
+    state.shapes.push(ns); state.selection.add(ns.id); added.push(ns);
   }
+  remapGroups(added);
   pushHistory(); draw();
 }
 function duplicateSelection() {
@@ -1804,12 +1819,14 @@ function duplicateSelection() {
   if (!list.length) return;
   const off = state.grid.step || 10;
   state.selection.clear();
+  const added = [];
   for (const s of list) {
     const ns = JSON.parse(JSON.stringify(s));
     ns.id = uid();
     translateShape(ns, off, off);
-    state.shapes.push(ns); state.selection.add(ns.id);
+    state.shapes.push(ns); state.selection.add(ns.id); added.push(ns);
   }
+  remapGroups(added);
   pushHistory(); draw();
 }
 function nudgeSelection(dx, dy) {
@@ -1921,14 +1938,16 @@ function runArray() {
   const dy = parseFloat(document.getElementById('arDy').value) || 0;
   const base = selectedShapesList();
   if (!base.length) { arrayDlg.style.display = 'none'; return; }
-  const created = [];
+  const created = [], createdShapes = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     if (r === 0 && c === 0) continue; // 原本はそのまま
+    const cell = [];
     for (const s of base) {
       const ns = JSON.parse(JSON.stringify(s)); ns.id = uid();
       translateShape(ns, c * dx, r * dy);
-      state.shapes.push(ns); created.push(ns.id);
+      state.shapes.push(ns); created.push(ns.id); cell.push(ns); createdShapes.push(ns);
     }
+    remapGroups(cell); // 各セルを独立したグループに
   }
   if (created.length) { state.selection.clear(); created.forEach(i => state.selection.add(i)); pushHistory(); }
   arrayDlg.style.display = 'none'; draw();
@@ -2125,8 +2144,9 @@ function buildDXF() {
   if (!shapes.length) return '';
   const out = [];
   const e = (c, v) => { out.push(String(c)); out.push(String(v)); };
-  const fy = y => (-y).toFixed(4);
-  const fx = x => (x).toFixed(4);
+  const fy = y => (Number.isFinite(y) ? -y : 0).toFixed(4);
+  const fx = x => (Number.isFinite(x) ? x : 0).toFixed(4);
+  const fr = r => (Number.isFinite(r) ? r : 0).toFixed(4);
   // 回転を反映した実world座標
   const tp = (s, x, y) => {
     if (!s.rot) return { x, y };
@@ -2147,7 +2167,7 @@ function buildDXF() {
       const c = [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]].map(([x, y]) => tp(s, x, y));
       polylineLines(layer, c, true);
     } else if (s.type === 'circle') {
-      const c = tp(s, s.cx, s.cy); e(0, 'CIRCLE'); e(8, layer); e(10, fx(c.x)); e(20, fy(c.y)); e(40, s.r.toFixed(4));
+      const c = tp(s, s.cx, s.cy); e(0, 'CIRCLE'); e(8, layer); e(10, fx(c.x)); e(20, fy(c.y)); e(40, fr(s.r));
     } else if (s.type === 'ellipse') {
       const seg = 48, pts = [];
       for (let i = 0; i < seg; i++) { const ang = i / seg * 2 * Math.PI; pts.push(tp(s, s.cx + s.rx * Math.cos(ang), s.cy + s.ry * Math.sin(ang))); }
@@ -2156,7 +2176,7 @@ function buildDXF() {
       polylineLines(layer, s.points.map(p => tp(s, p.x, p.y)), s.closed);
     } else if (s.type === 'text') {
       const p = tp(s, s.x, s.y + s.fontSize); // DXF TEXTはベースライン基準
-      e(0, 'TEXT'); e(8, layer); e(10, fx(p.x)); e(20, fy(p.y)); e(40, (s.fontSize || 16).toFixed(4)); e(1, String(s.text || '').replace(/\n/g, ' '));
+      e(0, 'TEXT'); e(8, layer); e(10, fx(p.x)); e(20, fy(p.y)); e(40, fr(s.fontSize || 16)); e(1, String(s.text || '').replace(/[\r\n\t]/g, ' '));
       if (s.rot) e(50, (-s.rot * 180 / Math.PI).toFixed(2));
     }
     // image は DXF 非対応のためスキップ
@@ -2256,7 +2276,7 @@ async function exportPDF() {
 const LS_KEY = 'simplecad.autosave.v1';
 let saveTimer = null;
 function saveNow() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ shapes: state.shapes, view: state.view, nextId, layers: state.layers, activeLayer: state.activeLayer, nextLayerId, grid: state.grid, style: state.style, ui: state.ui })); } catch (e) {}
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ shapes: state.shapes, view: state.view, nextId, layers: state.layers, activeLayer: state.activeLayer, nextLayerId, nextGroupId, grid: state.grid, style: state.style, ui: state.ui })); } catch (e) {}
 }
 function autosave() {
   clearTimeout(saveTimer);
@@ -2274,6 +2294,7 @@ function loadAutosave() {
     const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls;
     if (o.activeLayer) state.activeLayer = String(o.activeLayer);
     if (isNum(o.nextLayerId)) nextLayerId = +o.nextLayerId;
+    if (isNum(o.nextGroupId)) nextGroupId = +o.nextGroupId;
     // 設定(グリッド/スタイル)の復元
     if (o.grid && typeof o.grid === 'object') {
       const g = o.grid;
