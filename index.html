@@ -458,6 +458,8 @@ function resolvePoint(sx, sy) {
 // =========================================================================
 const isNum = v => Number.isFinite(+v);
 const num = (v, d = 0) => (isNum(v) ? +v : d);
+// 画像dataURLは base64 形式のみ許可(base64の文字集合に " < > は無く属性ブレイクアウト不能)
+const DATAURL_IMG = /^data:image\/(png|jpeg|jpg|gif|webp|bmp|svg\+xml)(;[a-zA-Z0-9.+=\-]+)*;base64,[A-Za-z0-9+/]+={0,2}$/;
 // 色は #hex / none / 基本色名 のみ許可。不正は既定値へ
 function safeColor(v, fallback) {
   if (v == null) return fallback;
@@ -489,8 +491,8 @@ function sanitizeShape(s) {
     case 'text':
       return { ...base, type: 'text', x: num(s.x), y: num(s.y), fontSize: Math.max(1, num(s.fontSize, 16)), text: String(s.text == null ? '' : s.text).slice(0, 5000) };
     case 'image':
-      // srcは data:image/ のみ許可(XSS防止)
-      if (!/^data:image\//.test(String(s.src || ''))) return null;
+      // srcは data:image/...;base64, のみ許可(XSS/属性ブレイクアウト防止)
+      if (!DATAURL_IMG.test(String(s.src || ''))) return null;
       return { ...base, type: 'image', x: num(s.x), y: num(s.y), w: Math.max(0, num(s.w)), h: Math.max(0, num(s.h)), src: String(s.src), opacity: Math.min(1, Math.max(0, num(s.opacity, 1))) };
     default:
       return null;
@@ -1056,7 +1058,7 @@ cv.addEventListener('pointerdown', e => {
 
   if (pointers.size === 2) {
     // ピンチ開始：作図途中ならドラフト破棄
-    draft = null; dragMove = null; marquee = null;
+    draft = null; dragMove = null; marquee = null; handleDrag = null;
     const [a, b] = [...pointers.values()];
     pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
     return;
@@ -1111,7 +1113,7 @@ function endPointer(e) {
   onToolUp(getXY(e));
 }
 cv.addEventListener('pointerup', endPointer);
-cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinch = null; panning = false; draft = null; marquee = null; });
+cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinch = null; panning = false; draft = null; marquee = null; dragMove = null; handleDrag = null; });
 
 // ホイールズーム
 cv.addEventListener('wheel', e => {
@@ -1253,9 +1255,22 @@ function onToolMove(p) {
   if (dragMove) {
     const wx = S2Wx(p.x), wy = S2Wy(p.y);
     let dx = wx - dragMove.startWorld.x, dy = wy - dragMove.startWorld.y;
-    // 移動先をグリッド吸着（最初の選択図形基準）
+    // グリッド吸着ON時は、最初の選択図形の基準点が格子に乗るよう移動量を補正
+    if (state.grid.snap) {
+      const o0 = dragMove.orig.values().next().value;
+      if (o0) {
+        const b = bbox({ ...o0 });
+        if (b) {
+          const g = state.grid.step;
+          const ax = b.x + dx, ay = b.y + dy;
+          dx += Math.round(ax / g) * g - ax;
+          dy += Math.round(ay / g) * g - ay;
+        }
+      }
+    }
     for (const [id, o] of dragMove.orig) {
       const s = state.shapes.find(x => x.id === id);
+      if (!s) continue; // 移動中に図形が消えた場合の保護
       const ns = JSON.parse(JSON.stringify(o));
       translateShape(ns, dx, dy);
       Object.assign(s, ns);
@@ -1582,8 +1597,11 @@ document.getElementById('imgInput').onchange = e => {
       const scale = Math.min(1, targetW / img.naturalWidth);
       const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
       const cx = S2Wx(viewW / 2), cy = S2Wy(viewH / 2);
+      const shape = sanitizeShape({ type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, src, opacity: 1, layer: state.activeLayer });
+      if (!shape) { toast('対応していない画像形式です'); return; }
+      shape.id = uid();
       imgCache.set(src, img);
-      state.shapes.push({ id: uid(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, src, opacity: 1, layer: state.activeLayer });
+      state.shapes.push(shape);
       pushHistory(); draw();
     };
     img.onerror = () => toast('画像の読み込みに失敗');
@@ -1614,7 +1632,8 @@ function pasteClipboard() {
   const off = state.grid.step || 10;
   state.selection.clear();
   for (const c of clipboard) {
-    const ns = JSON.parse(JSON.stringify(c));
+    const ns = sanitizeShape(JSON.parse(JSON.stringify(c)));
+    if (!ns) continue;
     ns.id = uid();
     if (!getLayer(ns.layer)) ns.layer = state.activeLayer;
     translateShape(ns, off, off);
@@ -1669,8 +1688,9 @@ function alignSelection(mode) {
   pushHistory(); draw();
 }
 function distributeSelection(axis) {
-  const list = selectedShapesList(); if (list.length < 3) { toast('分布は3個以上で'); return; }
+  const list = selectedShapesList();
   const boxes = list.map(s => ({ s, b: shapeExtent(s) })).filter(o => o.b);
+  if (boxes.length < 3) { toast('分布は3個以上で'); return; }
   const cen = o => axis === 'x' ? o.b.x + o.b.w / 2 : o.b.y + o.b.h / 2;
   boxes.sort((a, b) => cen(a) - cen(b));
   const first = cen(boxes[0]), last = cen(boxes[boxes.length - 1]);
@@ -1856,9 +1876,9 @@ function buildSVGString() {
       const xe = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       body += `<text x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" fill="${st}" font-size="${esc(s.fontSize || 16)}" font-family="sans-serif" dominant-baseline="text-before-edge">${xe(s.text || '')}</text>\n`;
     } else if (s.type === 'image') {
-      // data: 画像のみ埋め込む(他URLは安全のため出力しない)
-      if (/^data:image\//.test(s.src || '')) {
-        body += `<image x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" width="${esc(s.w)}" height="${esc(s.h)}" opacity="${(+s.opacity || 1)}" href="${s.src}" preserveAspectRatio="none"/>\n`;
+      // base64 data画像のみ埋め込む(厳格検証済みのみ。base64文字集合に引用符は無いが二重防御)
+      if (DATAURL_IMG.test(s.src || '')) {
+        body += `<image x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" width="${esc(s.w)}" height="${esc(s.h)}" opacity="${(+s.opacity || 1)}" href="${s.src.replace(/"/g, '&quot;')}" preserveAspectRatio="none"/>\n`;
       }
     }
     body += gClose;

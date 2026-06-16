@@ -599,6 +599,10 @@ check('SVGに<image data:url>が埋め込まれる', svgIm.includes('<image') &&
 await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.loadJSON({ shapes: [{ type: 'image', x: 0, y: 0, w: 10, h: 10, src: 'javascript:alert(1)' }] }); });
 const badImgCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
 check('不正src(非data:)の画像は除外される', badImgCnt === 0, 'count=' + badImgCnt);
+// 属性ブレイクアウトを狙った data:image/svg+xml(非base64)も除外
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.loadJSON({ shapes: [{ type: 'image', x: 0, y: 0, w: 10, h: 10, src: 'data:image/svg+xml,x"/><script>alert(1)</script>' }] }); });
+const breakoutCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('非base64のdata:image(ブレイクアウト試行)は除外', breakoutCnt === 0, 'count=' + breakoutCnt);
 // 保存読込で画像が復元される
 await page.evaluate((src) => { window.SimpleCAD.clearAll(); window.SimpleCAD.addShape({ id: 'im2', type: 'image', x: 0, y: 0, w: 50, h: 40, src, opacity: 1, layer: window.SimpleCAD.state.activeLayer }); }, PNG1);
 const dImg = await page.evaluate(() => window.SimpleCAD.dumpJSON());
