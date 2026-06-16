@@ -1,0 +1,14 @@
+{
+  "name": "SimpleCAD — ブラウザ簡易CAD",
+  "short_name": "SimpleCAD",
+  "description": "スマホ対応・依存なしのブラウザ2D CAD",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#1e293b",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
