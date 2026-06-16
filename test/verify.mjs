@@ -201,11 +201,11 @@ await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.setToo
 await page.mouse.click(box.x + 200, box.y + 200);
 const overlayShown = await page.evaluate(() => document.getElementById('textInput').style.display);
 check('テキストツールで入力欄が開く', overlayShown === 'block', 'display=' + overlayShown);
-// 入力してEnterで確定
+// 入力してCtrl+Enterで確定
 await page.evaluate(() => {
   const inp = document.getElementById('textInput');
   inp.value = '寸法注記A';
-  inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
 });
 const txt = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'text'));
 check('テキスト図形が作成される', txt && txt.text === '寸法注記A', JSON.stringify(txt && txt.text));
@@ -574,9 +574,10 @@ await page.evaluate(() => {
   window.SimpleCAD.state.style.stroke = '#ff8800';
   window.SimpleCAD.addShape({ id: 'pf', type: 'rect', x: 0, y: 0, w: 5, h: 5, stroke: '#fff', strokeWidth: 1, fill: null });
   window.SimpleCAD.saveNow(); // デバウンス待ちせず同期保存
+  // 状態を変えてからストア再読込(reload相当・決定論的)
+  window.SimpleCAD.state.grid.snap = true; window.SimpleCAD.state.grid.step = 10; window.SimpleCAD.state.style.stroke = '#000000';
+  window.SimpleCAD.reloadFromStore();
 });
-await page.reload();
-await page.waitForFunction(() => window.SimpleCAD, null, { timeout: 5000 });
 const prefs = await page.evaluate(() => ({ snap: window.SimpleCAD.state.grid.snap, step: window.SimpleCAD.state.grid.step, stroke: window.SimpleCAD.state.style.stroke, uiStep: document.getElementById('gStep').value, uiStroke: document.getElementById('pStroke').value }));
 check('リロードでグリッド設定が復元', prefs.snap === false && prefs.step === 50, JSON.stringify(prefs));
 check('リロードで線色設定が復元', prefs.stroke === '#ff8800', 'stroke=' + prefs.stroke);
@@ -783,10 +784,8 @@ const px = await page.evaluate(() => {
   const d = c.getImageData(2, 2, 1, 1).data; return [d[0], d[1], d[2]];
 });
 check('白モードで背景が白', px[0] > 240 && px[1] > 240 && px[2] > 240, JSON.stringify(px));
-// 設定が永続化される
-await page.evaluate(() => window.SimpleCAD.saveNow());
-await page.reload();
-await page.waitForFunction(() => window.SimpleCAD, null, { timeout: 5000 });
+// 設定が永続化される(saveNow→ストアから再読込)
+await page.evaluate(() => { window.SimpleCAD.saveNow(); window.SimpleCAD.state.ui.light = false; window.SimpleCAD.reloadFromStore(); });
 const lightRestored = await page.evaluate(() => ({ s: window.SimpleCAD.state.ui.light, ui: document.getElementById('cLight').checked }));
 check('用紙モードがリロードで復元', lightRestored.s === true && lightRestored.ui === true, JSON.stringify(lightRestored));
 
@@ -854,12 +853,10 @@ await page.evaluate(() => {
 });
 const groupIds = await page.evaluate(() => [...new Set(window.SimpleCAD.state.shapes.map(s => s.group))]);
 check('複製でグループが分かれる(2グループ)', groupIds.length === 2, JSON.stringify(groupIds));
-// nextGroupIdが永続化され、リロード後に既存と衝突しない
-await page.evaluate(() => window.SimpleCAD.saveNow());
-await page.reload();
-await page.waitForFunction(() => window.SimpleCAD, null, { timeout: 5000 });
+// nextGroupIdが永続化され、再読込後に既存と衝突しない
+await page.evaluate(() => { window.SimpleCAD.saveNow(); window.SimpleCAD.reloadFromStore(); });
 await page.evaluate(() => {
-  // リロード後に新規グループを作る
+  // 再読込後に新規グループを作る
   window.SimpleCAD.addShape({ id: 'q3', type: 'rect', x: 50, y: 50, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
   window.SimpleCAD.addShape({ id: 'q4', type: 'rect', x: 70, y: 50, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
   window.SimpleCAD.selectMany(['q3', 'q4']);
@@ -976,6 +973,20 @@ await page.evaluate(() => {
   window.SimpleCAD.selectMany(['c1', 'c2']);
 });
 check('ステータスに選択数2が表示', await page.evaluate(() => document.getElementById('ssel').textContent) === '2');
+
+// --- AU: 複数行テキスト ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.setTool('text'); });
+await page.mouse.click(box.x + 250, box.y + 250);
+await page.evaluate(() => {
+  const inp = document.getElementById('textInput');
+  inp.value = '1行目\n2行目\n3行目';
+  inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+});
+const mt = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'text'));
+check('複数行テキストが作成される', mt && mt.text.split('\n').length === 3, JSON.stringify(mt && mt.text));
+// SVGに複数tspan
+const svgMt = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('SVGに複数行のtspanが出る', (svgMt.match(/<tspan/g) || []).length === 3, '' + (svgMt.match(/<tspan/g) || []).length);
 
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));

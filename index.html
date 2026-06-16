@@ -209,7 +209,7 @@
     <canvas id="cv"></canvas>
 
     <!-- テキスト入力オーバーレイ -->
-    <input id="textInput" type="text" placeholder="文字を入力" style="display:none; position:absolute; z-index:30; background:rgba(15,23,42,.95); color:#fff; border:1px solid var(--accent); border-radius:6px; padding:4px 6px; font-size:14px;">
+    <textarea id="textInput" rows="1" placeholder="文字を入力 (改行可 / Ctrl+Enterで確定)" style="display:none; position:absolute; z-index:30; background:rgba(15,23,42,.95); color:#fff; border:1px solid var(--accent); border-radius:6px; padding:4px 6px; font-size:14px; resize:both; min-width:120px; line-height:1.25; white-space:pre;"></textarea>
 
     <!-- ツールパレット -->
     <div id="tools">
@@ -767,7 +767,9 @@ function drawShape(s, selected) {
     ctx.fillStyle = s.stroke || '#e2e8f0';
     ctx.font = (s.fontSize * state.view.scale) + 'px system-ui, "Noto Sans JP", sans-serif';
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText(s.text || '', W2Sx(s.x), W2Sy(s.y));
+    const lines = String(s.text || '').split('\n');
+    const lh = s.fontSize * 1.25 * state.view.scale;
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], W2Sx(s.x), W2Sy(s.y) + i * lh);
   } else if (s.type === 'image') {
     const img = getImg(s.src);
     if (img && img.complete && img.naturalWidth) {
@@ -1093,9 +1095,12 @@ function bbox(s) {
 function textSize(s) {
   ctx.save();
   ctx.font = (s.fontSize || 16) + 'px system-ui, "Noto Sans JP", sans-serif';
-  const w = ctx.measureText(s.text || '').width;
+  const lines = String(s.text || '').split('\n');
+  let w = 1;
+  for (const ln of lines) w = Math.max(w, ctx.measureText(ln).width);
   ctx.restore();
-  return { w: Math.max(w, 1), h: (s.fontSize || 16) };
+  const fs = (s.fontSize || 16);
+  return { w, h: lines.length > 1 ? (lines.length - 1) * fs * 1.25 + fs : fs };
 }
 
 // =========================================================================
@@ -1607,8 +1612,9 @@ function commitTextEditor() {
 }
 textInput.addEventListener('keydown', e => {
   e.stopPropagation();
-  if (e.key === 'Enter') { e.preventDefault(); commitTextEditor(); }
-  else if (e.key === 'Escape') { textInput.style.display = 'none'; textEditTarget = null; textEditPos = null; }
+  // Enterは改行、Ctrl/Cmd+Enterで確定
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commitTextEditor(); }
+  else if (e.key === 'Escape') { e.preventDefault(); textInput.style.display = 'none'; textEditTarget = null; textEditPos = null; }
 });
 textInput.addEventListener('blur', commitTextEditor);
 
@@ -2196,7 +2202,10 @@ function buildSVGString() {
       body += `<${tag} points="${pts}" stroke="${st}" stroke-width="${sw}" fill="${s.closed ? fl : 'none'}"${da}/>\n`;
     } else if (s.type === 'text') {
       const xe = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      body += `<text x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" fill="${st}" font-size="${esc(s.fontSize || 16)}" font-family="sans-serif" dominant-baseline="text-before-edge">${xe(s.text || '')}</text>\n`;
+      const fs = +s.fontSize || 16, lines = String(s.text || '').split('\n');
+      const tx = esc(s.x - ox);
+      const spans = lines.map((ln, i) => `<tspan x="${tx}" dy="${i === 0 ? 0 : esc(fs * 1.25)}">${xe(ln)}</tspan>`).join('');
+      body += `<text x="${tx}" y="${esc(s.y - oy)}" fill="${st}" font-size="${esc(fs)}" font-family="sans-serif" dominant-baseline="text-before-edge">${spans}</text>\n`;
     } else if (s.type === 'image') {
       // base64 data画像のみ埋め込む(厳格検証済みのみ。base64文字集合に引用符は無いが二重防御)
       if (DATAURL_IMG.test(s.src || '')) {
@@ -2448,6 +2457,7 @@ window.SimpleCAD = {
   select: (id) => { state.selection.clear(); if (id) state.selection.add(id); draw(); },
   selectMany: (ids) => { state.selection.clear(); (ids || []).forEach(i => state.selection.add(i)); draw(); },
   saveNow,
+  reloadFromStore: () => { state.selection.clear(); loadAutosave(); ensureLayers(); resetHistory(); syncPrefsUI(); draw(); },
   editAPI: { copy: copySelection, cut: cutSelection, paste: pasteClipboard, duplicate: duplicateSelection, nudge: nudgeSelection, selectAll },
   alignAPI: { align: alignSelection, distribute: distributeSelection },
   orderAPI: { reorder: reorderSelection },
