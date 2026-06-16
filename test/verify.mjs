@@ -531,6 +531,29 @@ await page.keyboard.up('Shift');
 const line = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'line'));
 check('Shiftで水平線に拘束(y1≈y2)', line && Math.abs(line.y1 - line.y2) < 0.5, JSON.stringify(line && { y1: line.y1, y2: line.y2 }));
 
+// --- V: 楕円ツール ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 }; window.SimpleCAD.state.grid.snap = false; window.SimpleCAD.setTool('ellipse'); });
+// world(80,80)〜(180,140) をドラッグ → cx130,cy110,rx50,ry30
+await drawDrag(page, { x: 0, y: 51 }, 80 * 2, 80 * 2, 180 * 2, 140 * 2);
+const el = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'ellipse'));
+check('楕円が作図される', !!el, JSON.stringify(el));
+check('楕円のrx/ryが正しい', el && Math.abs(el.rx - 50) < 1 && Math.abs(el.ry - 30) < 1, el && JSON.stringify({ cx: el.cx, cy: el.cy, rx: el.rx, ry: el.ry }));
+// 楕円の選択(輪郭をクリック: 右端 world cx+rx,cy)
+await page.evaluate(() => window.SimpleCAD.setTool('select'));
+const edge = { x: 0 + (el.cx + el.rx) * 2, y: 51 + el.cy * 2 };
+await page.mouse.click(edge.x, edge.y);
+const selEl = await page.evaluate(() => window.SimpleCAD.state.selection.size);
+check('楕円を輪郭クリックで選択できる', selEl === 1, 'sel=' + selEl);
+// SVGに<ellipse>
+const svgEl = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('SVGに<ellipse>要素', svgEl.includes('<ellipse'), svgEl.slice(0, 80));
+// 保存読込で復元
+const dE = await page.evaluate(() => window.SimpleCAD.dumpJSON());
+await page.evaluate(() => window.SimpleCAD.clearAll());
+await page.evaluate((d) => window.SimpleCAD.loadJSON(d), dE);
+const elR = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'ellipse'));
+check('楕円が保存読込で復元される', !!elR && Math.abs(elR.rx - 50) < 1, JSON.stringify(elR && elR.rx));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

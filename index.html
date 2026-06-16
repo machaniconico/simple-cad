@@ -192,6 +192,7 @@
       <button class="tool" data-tool="line" title="線分">／<span class="lbl">線</span></button>
       <button class="tool" data-tool="rect" title="矩形">▭<span class="lbl">矩形</span></button>
       <button class="tool" data-tool="circle" title="円">◯<span class="lbl">円</span></button>
+      <button class="tool" data-tool="ellipse" title="楕円">⬭<span class="lbl">楕円</span></button>
       <button class="tool" data-tool="polyline" title="ポリライン">⏚<span class="lbl">連線</span></button>
       <button class="tool" data-tool="text" title="文字">A<span class="lbl">文字</span></button>
       <button class="tool" data-tool="dim" title="寸法線">↔<span class="lbl">寸法</span></button>
@@ -476,6 +477,8 @@ function sanitizeShape(s) {
       return { ...base, type: 'rect', x: num(s.x), y: num(s.y), w: num(s.w), h: num(s.h) };
     case 'circle':
       return { ...base, type: 'circle', cx: num(s.cx), cy: num(s.cy), r: Math.max(0, num(s.r)) };
+    case 'ellipse':
+      return { ...base, type: 'ellipse', cx: num(s.cx), cy: num(s.cy), rx: Math.max(0, num(s.rx)), ry: Math.max(0, num(s.ry)) };
     case 'polyline':
       if (!Array.isArray(s.points) || !s.points.length) return null;
       return { ...base, type: 'polyline', closed: !!s.closed, points: s.points.map(p => ({ x: num(p && p.x), y: num(p && p.y) })) };
@@ -587,6 +590,10 @@ function drawShape(s, selected) {
     ctx.arc(W2Sx(s.cx), W2Sy(s.cy), s.r * state.view.scale, 0, Math.PI * 2);
     if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(); }
     ctx.stroke();
+  } else if (s.type === 'ellipse') {
+    ctx.ellipse(W2Sx(s.cx), W2Sy(s.cy), s.rx * state.view.scale, s.ry * state.view.scale, 0, 0, Math.PI * 2);
+    if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(); }
+    ctx.stroke();
   } else if (s.type === 'polyline') {
     const p = s.points;
     if (p.length) {
@@ -687,6 +694,10 @@ function drawDraft() {
     ctx.arc(W2Sx(s.cx), W2Sy(s.cy), s.r * state.view.scale, 0, Math.PI * 2); ctx.stroke();
     label = 'r ' + s.r.toFixed(1) + ' mm';
     showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
+  } else if (s.type === 'ellipse') {
+    ctx.ellipse(W2Sx(s.cx), W2Sy(s.cy), s.rx * state.view.scale, s.ry * state.view.scale, 0, 0, Math.PI * 2); ctx.stroke();
+    label = (s.rx * 2).toFixed(1) + ' × ' + (s.ry * 2).toFixed(1) + ' mm';
+    showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
   }
   ctx.setLineDash([]);
 }
@@ -749,10 +760,11 @@ function fieldsFor(s) {
   if (s.type === 'line' || s.type === 'dim') return [['x1', 'X1'], ['y1', 'Y1'], ['x2', 'X2'], ['y2', 'Y2']];
   if (s.type === 'rect') return [['x', 'X'], ['y', 'Y'], ['w', '幅'], ['h', '高さ']];
   if (s.type === 'circle') return [['cx', '中心X'], ['cy', '中心Y'], ['r', '半径']];
+  if (s.type === 'ellipse') return [['cx', '中心X'], ['cy', '中心Y'], ['rx', '横半径'], ['ry', '縦半径']];
   if (s.type === 'text') return [['x', 'X'], ['y', 'Y'], ['fontSize', '字高']];
   return null;
 }
-const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', polyline: 'ポリライン' }[t] || t);
+const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', ellipse: '楕円', polyline: 'ポリライン', text: 'テキスト' }[t] || t);
 
 // 選択が変わったら再構築、同じならば値だけ同期（フォーカス中の欄は触らない）
 function updateNumPanel() {
@@ -827,6 +839,7 @@ function bbox(s) {
     return { x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2), w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1) };
   if (s.type === 'rect') return { x: s.x, y: s.y, w: s.w, h: s.h };
   if (s.type === 'circle') return { x: s.cx - s.r, y: s.cy - s.r, w: s.r * 2, h: s.r * 2 };
+  if (s.type === 'ellipse') return { x: s.cx - s.rx, y: s.cy - s.ry, w: s.rx * 2, h: s.ry * 2 };
   if (s.type === 'polyline') {
     const xs = s.points.map(p => p.x), ys = s.points.map(p => p.y);
     return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
@@ -868,6 +881,13 @@ function hitTest(wx, wy) {
       const d = Math.hypot(qx - s.cx, qy - s.cy);
       if (s.fill && d <= s.r) return s;
       if (Math.abs(d - s.r) < thr) return s;
+    } else if (s.type === 'ellipse') {
+      const nx = (qx - s.cx) / (s.rx || 1e-6), ny = (qy - s.cy) / (s.ry || 1e-6);
+      const v = nx * nx + ny * ny;
+      if (s.fill && v <= 1) return s;
+      // 楕円輪郭付近: 法線方向の距離近似で判定
+      const rr = Math.hypot(nx, ny);
+      if (rr > 0 && Math.abs(rr - 1) * Math.min(s.rx, s.ry) < thr) return s;
     } else if (s.type === 'polyline') {
       const p = s.points;
       for (let k = 0; k < p.length - 1; k++)
@@ -929,6 +949,9 @@ function scaleShapeAbout(s, ax, ay, sx, sy) {
   } else if (s.type === 'circle') {
     const cc = f(s.cx, s.cy); s.cx = cc.x; s.cy = cc.y;
     s.r = Math.max(0.01, s.r * (Math.abs(sx) + Math.abs(sy)) / 2);
+  } else if (s.type === 'ellipse') {
+    const cc = f(s.cx, s.cy); s.cx = cc.x; s.cy = cc.y;
+    s.rx = Math.max(0.01, s.rx * Math.abs(sx)); s.ry = Math.max(0.01, s.ry * Math.abs(sy));
   } else if (s.type === 'text') {
     const pp = f(s.x, s.y); s.x = pp.x; s.y = pp.y;
     s.fontSize = Math.max(1, s.fontSize * Math.abs(sy));
@@ -942,6 +965,7 @@ function translateShape(s, dx, dy) {
   if (s.type === 'line' || s.type === 'dim') { s.x1 += dx; s.y1 += dy; s.x2 += dx; s.y2 += dy; }
   else if (s.type === 'rect') { s.x += dx; s.y += dy; }
   else if (s.type === 'circle') { s.cx += dx; s.cy += dy; }
+  else if (s.type === 'ellipse') { s.cx += dx; s.cy += dy; }
   else if (s.type === 'text') { s.x += dx; s.y += dy; }
   else if (s.type === 'polyline') for (const p of s.points) { p.x += dx; p.y += dy; }
 }
@@ -1092,6 +1116,7 @@ function onToolDown(p) {
   if (t === 'line' || t === 'dim') { draft = { type: t, x1: w.x, y1: w.y, x2: w.x, y2: w.y }; }
   else if (t === 'rect') { draft = { type: 'rect', x: w.x, y: w.y, w: 0, h: 0, _ox: w.x, _oy: w.y }; }
   else if (t === 'circle') { draft = { type: 'circle', cx: w.x, cy: w.y, r: 0 }; }
+  else if (t === 'ellipse') { draft = { type: 'ellipse', cx: w.x, cy: w.y, rx: 0, ry: 0, _ox: w.x, _oy: w.y }; }
   else if (t === 'polyline') { handlePolyTap(w); }
   else if (t === 'text') { openTextEditor(w, null); }
   draw();
@@ -1198,6 +1223,12 @@ function onToolMove(p) {
     }
     draft.x = Math.min(draft._ox, ex); draft.y = Math.min(draft._oy, ey); draft.w = Math.abs(ex - draft._ox); draft.h = Math.abs(ey - draft._oy);
   } else if (draft.type === 'circle') { draft.r = Math.hypot(w.x - draft.cx, w.y - draft.cy); }
+  else if (draft.type === 'ellipse') {
+    let ex = w.x, ey = w.y;
+    if (shiftHeld) { const m = Math.max(Math.abs(ex - draft._ox), Math.abs(ey - draft._oy)); ex = draft._ox + Math.sign(ex - draft._ox || 1) * m; ey = draft._oy + Math.sign(ey - draft._oy || 1) * m; }
+    draft.cx = (draft._ox + ex) / 2; draft.cy = (draft._oy + ey) / 2;
+    draft.rx = Math.abs(ex - draft._ox) / 2; draft.ry = Math.abs(ey - draft._oy) / 2;
+  }
   draw();
 }
 
@@ -1236,6 +1267,9 @@ function onToolUp(p) {
   } else if (s.type === 'circle') {
     if (s.r < 0.01) { draw(); return; }
     state.shapes.push({ id: uid(), type: 'circle', cx: s.cx, cy: s.cy, r: s.r, ...sty() });
+  } else if (s.type === 'ellipse') {
+    if (s.rx < 0.01 || s.ry < 0.01) { draw(); return; }
+    state.shapes.push({ id: uid(), type: 'ellipse', cx: s.cx, cy: s.cy, rx: s.rx, ry: s.ry, ...sty() });
   }
   pushHistory(); draw();
 }
@@ -1710,6 +1744,8 @@ function buildSVGString() {
       body += `<rect x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" width="${esc(s.w)}" height="${esc(s.h)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"/>\n`;
     } else if (s.type === 'circle') {
       body += `<circle cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" r="${esc(s.r)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"/>\n`;
+    } else if (s.type === 'ellipse') {
+      body += `<ellipse cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" rx="${esc(s.rx)}" ry="${esc(s.ry)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"/>\n`;
     } else if (s.type === 'polyline') {
       const pts = s.points.map(p => `${esc(p.x - ox)},${esc(p.y - oy)}`).join(' ');
       const tag = s.closed ? 'polygon' : 'polyline';
