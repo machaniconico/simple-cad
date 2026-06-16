@@ -78,7 +78,7 @@
 
 ```bash
 npm install && npx playwright install chromium   # 初回のみ
-node test/verify.mjs    # 機能テスト 141項目
+node test/verify.mjs    # 機能テスト 173項目
 node test/pwacheck.mjs  # PWA(SW/オフライン) 6項目
 node test/pdfcheck.mjs  # 生成PDFのxrefオフセット構造検証
 ```
