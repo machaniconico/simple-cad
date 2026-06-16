@@ -742,6 +742,22 @@ await page.evaluate(() => document.querySelector('#selActions button[data-act=de
 actCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
 check('削除ボタンで選択を削除', actCnt === 1, 'count=' + actCnt);
 
+// --- AH: 計測情報(面積/周長) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'mi', type: 'rect', x: 0, y: 0, w: 100, h: 50, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('mi');
+});
+const infoRect = await page.evaluate(() => document.getElementById('npInfo')?.textContent || '');
+check('矩形の面積(5000)と周(300)が表示', infoRect.includes('5000') && infoRect.includes('300'), infoRect);
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'mc', type: 'circle', cx: 0, cy: 0, r: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('mc');
+});
+const infoCir = await page.evaluate(() => document.getElementById('npInfo')?.textContent || '');
+check('円の面積(≈314)が表示', infoCir.includes('314'), infoCir);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

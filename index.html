@@ -888,9 +888,29 @@ function fieldsFor(s) {
   if (s.type === 'ellipse') return [['cx', '中心X'], ['cy', '中心Y'], ['rx', '横半径'], ['ry', '縦半径']];
   if (s.type === 'text') return [['x', 'X'], ['y', 'Y'], ['fontSize', '字高']];
   if (s.type === 'image') return [['x', 'X'], ['y', 'Y'], ['w', '幅'], ['h', '高さ'], ['opacity', '不透明度']];
+  if (s.type === 'polyline') return []; // 編集欄は無いが計測情報は表示
   return null;
 }
 const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', ellipse: '楕円', polyline: 'ポリライン', text: 'テキスト', image: '画像' }[t] || t);
+// 選択図形の計測情報(面積/長さ/周長)。無ければ空文字
+function measureInfo(s) {
+  const f1 = v => v.toFixed(1);
+  if (s.type === 'line' || s.type === 'dim') return '長さ ' + f1(Math.hypot(s.x2 - s.x1, s.y2 - s.y1)) + ' mm';
+  if (s.type === 'rect') return '面積 ' + f1(Math.abs(s.w * s.h)) + ' mm² / 周 ' + f1(2 * (Math.abs(s.w) + Math.abs(s.h))) + ' mm';
+  if (s.type === 'circle') return '面積 ' + f1(Math.PI * s.r * s.r) + ' mm² / 円周 ' + f1(2 * Math.PI * s.r) + ' mm';
+  if (s.type === 'ellipse') return '面積 ' + f1(Math.PI * s.rx * s.ry) + ' mm²';
+  if (s.type === 'polyline') {
+    const p = s.points; let len = 0;
+    for (let i = 0; i < p.length - 1; i++) len += Math.hypot(p[i + 1].x - p[i].x, p[i + 1].y - p[i].y);
+    if (s.closed && p.length > 1) {
+      len += Math.hypot(p[0].x - p[p.length - 1].x, p[0].y - p[p.length - 1].y);
+      let a = 0; for (let i = 0; i < p.length; i++) { const j = (i + 1) % p.length; a += p[i].x * p[j].y - p[j].x * p[i].y; }
+      return '面積 ' + f1(Math.abs(a) / 2) + ' mm² / 周 ' + f1(len) + ' mm';
+    }
+    return '全長 ' + f1(len) + ' mm';
+  }
+  return '';
+}
 
 // 選択が変わったら再構築、同じならば値だけ同期（フォーカス中の欄は触らない）
 function updateNumPanel() {
@@ -938,11 +958,10 @@ function buildNumPanel(s, fields) {
     row.append(document.createTextNode(label + ' '), inp);
     numProps.appendChild(row);
   }
-  if (s.type === 'line' || s.type === 'dim') {
-    const len = document.createElement('div'); len.className = 'npro'; len.id = 'npLen';
-    len.textContent = '長さ ' + Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(2) + ' mm';
-    numProps.appendChild(len);
-  }
+  // 計測情報(面積/長さ/周長)
+  const info = document.createElement('div'); info.className = 'npro'; info.id = 'npInfo';
+  info.textContent = measureInfo(s);
+  numProps.appendChild(info);
   // 角度(度)編集欄
   const arow = document.createElement('label');
   const ainp = document.createElement('input');
@@ -960,8 +979,8 @@ function syncNumValues(s) {
   });
   const adeg = numProps.querySelector('input[data-kdeg]');
   if (adeg && document.activeElement !== adeg) adeg.value = ((s.rot || 0) * 180 / Math.PI).toFixed(1);
-  const len = document.getElementById('npLen');
-  if (len) len.textContent = '長さ ' + Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(2) + ' mm';
+  const info = document.getElementById('npInfo');
+  if (info) info.textContent = measureInfo(s);
 }
 
 // 図形のバウンディングボックス(world)
