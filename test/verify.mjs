@@ -790,6 +790,31 @@ await page.waitForFunction(() => window.SimpleCAD, null, { timeout: 5000 });
 const lightRestored = await page.evaluate(() => ({ s: window.SimpleCAD.state.ui.light, ui: document.getElementById('cLight').checked }));
 check('用紙モードがリロードで復元', lightRestored.s === true && lightRestored.ui === true, JSON.stringify(lightRestored));
 
+// --- AK: 矩形配列複製 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.setTool('select');
+  window.SimpleCAD.addShape({ id: 'ar', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('ar');
+  document.querySelector('#selActions button[data-act=array]').click();
+});
+const dlgOpen = await page.evaluate(() => document.getElementById('arrayDlg').style.display);
+check('配列ダイアログが開く', dlgOpen === 'flex', 'disp=' + dlgOpen);
+await page.evaluate(() => {
+  document.getElementById('arRows').value = '2';
+  document.getElementById('arCols').value = '3';
+  document.getElementById('arDx').value = '20';
+  document.getElementById('arDy').value = '20';
+  document.getElementById('arrayOk').click();
+});
+const arrCnt = await page.evaluate(() => window.SimpleCAD.shapeCount());
+check('2×3配列で計6図形', arrCnt === 6, 'count=' + arrCnt);
+const xs = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.x).sort((a, b) => a - b));
+check('列間隔20で x が 0,20,40 を含む', xs.includes(0) && xs.includes(20) && xs.includes(40), JSON.stringify(xs));
+// Undoで原本1個に戻る
+await page.evaluate(() => window.SimpleCAD.undo());
+check('配列をUndoで1個に戻す', (await page.evaluate(() => window.SimpleCAD.shapeCount())) === 1);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

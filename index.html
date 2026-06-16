@@ -148,14 +148,15 @@
   .lrow .lname:focus { border-color: var(--line); background: var(--panel2); outline: none; }
   .lrow .ldot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); cursor: pointer; flex: 0 0 auto; }
   .lrow.active .ldot { border-color: var(--accent); background: var(--accent); }
-  /* ヘルプ */
-  #help { position: absolute; inset: 0; background: rgba(2,6,23,.7); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
-  #help .helpcard { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; max-width: 460px; width: 100%; max-height: 86%; overflow-y: auto; padding: 18px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
-  #help h2 { margin: 0 0 10px; font-size: 17px; color: var(--accent); }
+  /* モーダル(ヘルプ/配列) */
+  #help, #arrayDlg { position: absolute; inset: 0; background: rgba(2,6,23,.7); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+  #arrayDlg input { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  #help .helpcard, #arrayDlg .helpcard { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; max-width: 460px; width: 100%; max-height: 86%; overflow-y: auto; padding: 18px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #help h2, #arrayDlg h2 { margin: 0 0 10px; font-size: 17px; color: var(--accent); }
   #help h3 { margin: 14px 0 4px; font-size: 13px; color: var(--accent2); }
   #help ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
   #help b { color: #fff; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 12px; }
-  #helpClose { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 8px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
+  #helpClose, #arrayClose { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 8px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
   .toast {
     position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(15,23,42,.95); border: 1px solid var(--accent); color: var(--text);
@@ -265,6 +266,7 @@
           <div class="alrow">
             <button data-act="dup" title="複製 (Ctrl+D)">⧉ 複製</button>
             <button data-act="del" title="削除 (Delete)">🗑 削除</button>
+            <button data-act="array" title="配列複製(行×列)">▦ 配列</button>
           </div>
         </div>
         <div id="orderBox" style="display:none">
@@ -301,6 +303,19 @@
     </div>
 
     <div class="toast" id="toast"></div>
+
+    <!-- 配列複製ダイアログ -->
+    <div id="arrayDlg" style="display:none">
+      <div class="helpcard" style="max-width:280px">
+        <button id="arrayClose" title="閉じる">✕</button>
+        <h2>▦ 配列複製</h2>
+        <label style="display:flex;justify-content:space-between;margin:6px 0">行数 <input type="number" id="arRows" min="1" max="100" value="2" style="width:80px"></label>
+        <label style="display:flex;justify-content:space-between;margin:6px 0">列数 <input type="number" id="arCols" min="1" max="100" value="3" style="width:80px"></label>
+        <label style="display:flex;justify-content:space-between;margin:6px 0">行間隔 <input type="number" id="arDy" value="40" style="width:80px"> mm</label>
+        <label style="display:flex;justify-content:space-between;margin:6px 0">列間隔 <input type="number" id="arDx" value="40" style="width:80px"> mm</label>
+        <button id="arrayOk" class="tbtn" style="width:100%;margin-top:8px;background:var(--accent2);color:#001;border:none;height:38px;border-radius:8px;cursor:pointer">作成</button>
+      </div>
+    </div>
 
     <!-- ヘルプ -->
     <div id="help" style="display:none">
@@ -1867,9 +1882,35 @@ function deleteSelection() {
   state.shapes = state.shapes.filter(s => !state.selection.has(s.id));
   state.selection.clear(); pushHistory(); draw();
 }
+// 矩形配列複製
+const arrayDlg = document.getElementById('arrayDlg');
+function openArrayDlg() { if (!state.selection.size) return; arrayDlg.style.display = 'flex'; }
+function runArray() {
+  const rows = Math.min(100, Math.max(1, parseInt(document.getElementById('arRows').value) || 1));
+  const cols = Math.min(100, Math.max(1, parseInt(document.getElementById('arCols').value) || 1));
+  const dx = parseFloat(document.getElementById('arDx').value) || 0;
+  const dy = parseFloat(document.getElementById('arDy').value) || 0;
+  const base = selectedShapesList();
+  if (!base.length) { arrayDlg.style.display = 'none'; return; }
+  const created = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (r === 0 && c === 0) continue; // 原本はそのまま
+    for (const s of base) {
+      const ns = JSON.parse(JSON.stringify(s)); ns.id = uid();
+      translateShape(ns, c * dx, r * dy);
+      state.shapes.push(ns); created.push(ns.id);
+    }
+  }
+  if (created.length) { state.selection.clear(); created.forEach(i => state.selection.add(i)); pushHistory(); }
+  arrayDlg.style.display = 'none'; draw();
+}
+document.getElementById('arrayClose').onclick = () => { arrayDlg.style.display = 'none'; };
+document.getElementById('arrayOk').onclick = runArray;
+arrayDlg.addEventListener('click', e => { if (e.target === arrayDlg) arrayDlg.style.display = 'none'; });
+
 const selActions = document.getElementById('selActions');
 selActions.querySelectorAll('button[data-act]').forEach(btn => {
-  btn.onclick = () => { if (btn.dataset.act === 'dup') duplicateSelection(); else deleteSelection(); };
+  btn.onclick = () => { const a = btn.dataset.act; if (a === 'dup') duplicateSelection(); else if (a === 'del') deleteSelection(); else if (a === 'array') openArrayDlg(); };
 });
 function updateSelActions() {
   selActions.style.display = (state.tool === 'select' && state.selection.size >= 1) ? 'block' : 'none';
