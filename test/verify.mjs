@@ -936,6 +936,16 @@ await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.addSha
 const snapEl = await page.evaluate(() => window.SimpleCAD.resolvePoint((140 + 2) * 2, 100 * 2)); // 右四分点(140,100)
 check('楕円の四分点にスナップ', Math.abs(snapEl.x - 140) < 0.01 && Math.abs(snapEl.y - 100) < 0.01, JSON.stringify(snapEl));
 
+// --- AR: 半径寸法 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'rc', type: 'circle', cx: 50, cy: 50, r: 25, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('rc');
+  document.querySelector('#numProps button').click(); // 半径寸法を追加ボタン
+});
+const rdim = await page.evaluate(() => window.SimpleCAD.state.shapes.find(s => s.type === 'dim'));
+check('半径寸法(dim)が中心→端で作成される', rdim && rdim.x1 === 50 && rdim.x2 === 75 && rdim.y1 === rdim.y2, JSON.stringify(rdim && { x1: rdim.x1, x2: rdim.x2 }));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

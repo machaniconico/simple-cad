@@ -959,6 +959,12 @@ function fieldsFor(s) {
   return null;
 }
 const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', ellipse: '楕円', polyline: 'ポリライン', text: 'テキスト', image: '画像' }[t] || t);
+// 円/楕円に半径寸法(中心→右端のdim)を追加
+function addRadiusDim(s) {
+  const r = s.type === 'circle' ? s.r : s.rx;
+  state.shapes.push({ id: uid(), type: 'dim', x1: s.cx, y1: s.cy, x2: s.cx + r, y2: s.cy, stroke: '#fbbf24', strokeWidth: 1.5, fill: null, dash: 'solid', layer: state.activeLayer });
+  pushHistory(); draw(); toast('半径寸法を追加しました');
+}
 // 選択図形の計測情報(面積/長さ/周長)。無ければ空文字
 function measureInfo(s) {
   const f1 = v => v.toFixed(1);
@@ -1038,6 +1044,14 @@ function buildNumPanel(s, fields) {
   ainp.addEventListener('change', () => pushHistory());
   arow.append(document.createTextNode('角度° '), ainp);
   numProps.appendChild(arow);
+  // 円/楕円: 半径寸法を追加するボタン
+  if (s.type === 'circle' || s.type === 'ellipse') {
+    const rb = document.createElement('button');
+    rb.textContent = '⊙ 半径寸法を追加';
+    rb.style.cssText = 'width:100%;margin-top:6px;height:30px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;cursor:pointer;font-size:12px';
+    rb.onclick = () => addRadiusDim(s);
+    numProps.appendChild(rb);
+  }
   numBuiltFor = s.id;
 }
 function syncNumValues(s) {
