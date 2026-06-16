@@ -219,6 +219,7 @@
         <label>線色 <input type="color" id="pStroke" value="#38bdf8"></label>
         <label>塗り <span><input type="checkbox" id="pFillOn"> <input type="color" id="pFill" value="#1e3a5f"></span></label>
         <label>線幅 <input type="range" id="pWidth" min="1" max="10" step="0.5" value="2"><span id="pWidthVal" style="width:22px;text-align:right">2</span></label>
+        <label>線種 <select id="pDash"><option value="solid">実線</option><option value="dashed">破線</option><option value="dotted">点線</option></select></label>
         <label>字高 <input type="number" id="pFont" min="1" step="1" value="16"> mm</label>
         <label>辺数 <input type="number" id="pSides" min="3" max="60" step="1" value="6"></label>
         <hr style="border-color:var(--line)">
@@ -348,7 +349,7 @@ const state = {
   view: { scale: 2, offsetX: 0, offsetY: 0 }, // 1mm = scale px
   tool: 'select',
   selection: new Set(),                // 選択中のid
-  style: { stroke: '#38bdf8', strokeWidth: 2, fill: null, fontSize: 16, sides: 6 },
+  style: { stroke: '#38bdf8', strokeWidth: 2, fill: null, fontSize: 16, sides: 6, dash: 'solid' },
   grid: { show: true, snap: true, osnap: true, step: 10 },
   layers: [{ id: 'L1', name: 'レイヤー1', visible: true, locked: false }],
   activeLayer: 'L1',
@@ -517,6 +518,7 @@ function sanitizeShape(s) {
     stroke: safeColor(s.stroke, '#38bdf8'),
     fill: s.fill == null ? null : safeColor(s.fill, null),
     strokeWidth: Math.max(0.1, num(s.strokeWidth, 2)),
+    dash: ['solid', 'dashed', 'dotted'].includes(s.dash) ? s.dash : 'solid',
     rot: num(s.rot, 0),
   };
   switch (s.type) {
@@ -632,10 +634,17 @@ function getImg(src) {
   return img;
 }
 
+// 線種→canvas破線パターン(world mm基準。描画時にscale倍)
+function dashArray(dash, scale) {
+  if (dash === 'dashed') return [5 * scale, 3 * scale];
+  if (dash === 'dotted') return [0.6 * scale, 2 * scale];
+  return [];
+}
 function applyStyle(s) {
   ctx.strokeStyle = s.stroke || '#38bdf8';
   ctx.lineWidth = (s.strokeWidth || 2);
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.setLineDash(s.dash ? dashArray(s.dash, state.view.scale) : []);
 }
 
 function drawShape(s, selected) {
@@ -699,6 +708,7 @@ function drawShape(s, selected) {
 // 寸法線（矢羽根＋距離ラベル）
 function drawDimension(s) {
   const ax = W2Sx(s.x1), ay = W2Sy(s.y1), bx = W2Sx(s.x2), by = W2Sy(s.y2);
+  ctx.setLineDash([]); // 寸法線は常に実線
   ctx.strokeStyle = s.stroke || '#fbbf24';
   ctx.fillStyle = s.stroke || '#fbbf24';
   ctx.lineWidth = 1.5;
@@ -1395,7 +1405,7 @@ function onToolUp(p) {
   }
   if (!draft) return;
   const s = draft; draft = null; snapMarker = null;
-  const sty = () => ({ stroke: state.style.stroke, strokeWidth: state.style.strokeWidth, fill: state.style.fill, layer: state.activeLayer });
+  const sty = () => ({ stroke: state.style.stroke, strokeWidth: state.style.strokeWidth, fill: state.style.fill, dash: state.style.dash, layer: state.activeLayer });
 
   if (s.type === 'line' || s.type === 'dim') {
     if (Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < 0.01) { draw(); return; }
@@ -1430,7 +1440,7 @@ function handlePolyTap(w) {
 function commitPoly(closed) {
   if (polyPts && polyPts.length >= 2) {
     state.shapes.push({ id: uid(), type: 'polyline', points: polyPts.map(p => ({ x: p.x, y: p.y })), closed: !!closed,
-      stroke: state.style.stroke, strokeWidth: state.style.strokeWidth, fill: state.style.fill, layer: state.activeLayer });
+      stroke: state.style.stroke, strokeWidth: state.style.strokeWidth, fill: state.style.fill, dash: state.style.dash, layer: state.activeLayer });
     pushHistory();
   }
   polyPts = null; snapMarker = null;
@@ -1510,6 +1520,8 @@ const pFont = document.getElementById('pFont');
 pFont.oninput = () => { const v = parseFloat(pFont.value); if (!isNaN(v) && v > 0) state.style.fontSize = v; };
 const pSides = document.getElementById('pSides');
 pSides.oninput = () => { const v = parseInt(pSides.value); if (!isNaN(v)) state.style.sides = Math.min(60, Math.max(3, v)); };
+const pDash = document.getElementById('pDash');
+pDash.onchange = () => { state.style.dash = pDash.value; };
 
 document.getElementById('cGrid').onchange = e => { state.grid.show = e.target.checked; draw(); };
 document.getElementById('cSnap').onchange = e => { state.grid.snap = e.target.checked; };
@@ -1523,7 +1535,7 @@ document.getElementById('btnApply').onclick = () => {
     const s = state.shapes.find(x => x.id === id);
     if (!s || s.type === 'dim') continue;
     if (s.type === 'text') { s.stroke = state.style.stroke; s.fontSize = state.style.fontSize; continue; }
-    s.stroke = state.style.stroke; s.strokeWidth = state.style.strokeWidth; s.fill = state.style.fill;
+    s.stroke = state.style.stroke; s.strokeWidth = state.style.strokeWidth; s.fill = state.style.fill; s.dash = state.style.dash;
   }
   pushHistory(); draw();
 };
@@ -1914,6 +1926,8 @@ function buildSVGString() {
   for (const s of shapes) {
     // 属性へ入れる値は色を検証し線幅は数値化(壊れたデータでの属性インジェクション防止)
     const st = safeColor(s.stroke, '#000'), sw = (+s.strokeWidth || 1), fl = safeColor(s.fill, 'none');
+    // 線種(寸法は常に実線)
+    const da = (s.type !== 'dim' && s.dash === 'dashed') ? ' stroke-dasharray="5,3"' : (s.type !== 'dim' && s.dash === 'dotted') ? ' stroke-dasharray="0.6,2"' : '';
     // 回転図形はグループに rotate transform を付与
     let gOpen = '', gClose = '';
     if (s.rot) {
@@ -1923,21 +1937,21 @@ function buildSVGString() {
     }
     body += gOpen;
     if (s.type === 'line' || s.type === 'dim') {
-      body += `<line x1="${esc(s.x1 - ox)}" y1="${esc(s.y1 - oy)}" x2="${esc(s.x2 - ox)}" y2="${esc(s.y2 - oy)}" stroke="${st}" stroke-width="${sw}"/>\n`;
+      body += `<line x1="${esc(s.x1 - ox)}" y1="${esc(s.y1 - oy)}" x2="${esc(s.x2 - ox)}" y2="${esc(s.y2 - oy)}" stroke="${st}" stroke-width="${sw}"${da}/>\n`;
       if (s.type === 'dim') {
         const d = Math.hypot(s.x2 - s.x1, s.y2 - s.y1).toFixed(1);
         body += `<text x="${esc((s.x1 + s.x2) / 2 - ox)}" y="${esc((s.y1 + s.y2) / 2 - oy - 3)}" fill="${st}" font-size="10" text-anchor="middle">${d} mm</text>\n`;
       }
     } else if (s.type === 'rect') {
-      body += `<rect x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" width="${esc(s.w)}" height="${esc(s.h)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"/>\n`;
+      body += `<rect x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" width="${esc(s.w)}" height="${esc(s.h)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"${da}/>\n`;
     } else if (s.type === 'circle') {
-      body += `<circle cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" r="${esc(s.r)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"/>\n`;
+      body += `<circle cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" r="${esc(s.r)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"${da}/>\n`;
     } else if (s.type === 'ellipse') {
-      body += `<ellipse cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" rx="${esc(s.rx)}" ry="${esc(s.ry)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"/>\n`;
+      body += `<ellipse cx="${esc(s.cx - ox)}" cy="${esc(s.cy - oy)}" rx="${esc(s.rx)}" ry="${esc(s.ry)}" stroke="${st}" stroke-width="${sw}" fill="${fl}"${da}/>\n`;
     } else if (s.type === 'polyline') {
       const pts = s.points.map(p => `${esc(p.x - ox)},${esc(p.y - oy)}`).join(' ');
       const tag = s.closed ? 'polygon' : 'polyline';
-      body += `<${tag} points="${pts}" stroke="${st}" stroke-width="${sw}" fill="${s.closed ? fl : 'none'}"/>\n`;
+      body += `<${tag} points="${pts}" stroke="${st}" stroke-width="${sw}" fill="${s.closed ? fl : 'none'}"${da}/>\n`;
     } else if (s.type === 'text') {
       const xe = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       body += `<text x="${esc(s.x - ox)}" y="${esc(s.y - oy)}" fill="${st}" font-size="${esc(s.fontSize || 16)}" font-family="sans-serif" dominant-baseline="text-before-edge">${xe(s.text || '')}</text>\n`;
@@ -2082,6 +2096,7 @@ function loadAutosave() {
       if (isNum(st.strokeWidth)) state.style.strokeWidth = Math.max(0.1, +st.strokeWidth);
       if (isNum(st.fontSize)) state.style.fontSize = Math.max(1, +st.fontSize);
       if (isNum(st.sides)) state.style.sides = Math.min(60, Math.max(3, st.sides | 0));
+      if (['solid', 'dashed', 'dotted'].includes(st.dash)) state.style.dash = st.dash;
     }
     return true;
   } catch (e) { return false; }
@@ -2098,6 +2113,7 @@ function syncPrefsUI() {
   document.getElementById('pWidthVal').textContent = String(state.style.strokeWidth);
   document.getElementById('pFont').value = String(state.style.fontSize);
   document.getElementById('pSides').value = String(state.style.sides);
+  document.getElementById('pDash').value = state.style.dash;
   document.getElementById('pFillOn').checked = state.style.fill != null;
   if (state.style.fill != null) document.getElementById('pFill').value = state.style.fill;
 }

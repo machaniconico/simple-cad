@@ -683,6 +683,19 @@ await page.evaluate(() => document.getElementById('helpClose').click());
 helpDisp = await page.evaluate(() => document.getElementById('help').style.display);
 check('閉じるボタンで閉じる', helpDisp === 'none', 'display=' + helpDisp);
 
+// --- AD: 線種(破線/点線) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.style.dash = 'dashed';
+  window.SimpleCAD.addShape({ id: 'ds', type: 'rect', x: 0, y: 0, w: 40, h: 30, stroke: '#000', strokeWidth: 1, fill: null, dash: 'dashed' });
+});
+const svgDash = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('破線がSVGにstroke-dasharrayで出力', svgDash.includes('stroke-dasharray="5,3"'), svgDash.slice(0, 120));
+// サニタイズで不正dashはsolidに
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.loadJSON({ shapes: [{ type: 'rect', x: 0, y: 0, w: 5, h: 5, dash: 'evil' }] }); });
+const dashSan = await page.evaluate(() => window.SimpleCAD.state.shapes[0].dash);
+check('不正な線種はsolidに矯正', dashSan === 'solid', 'dash=' + dashSan);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
