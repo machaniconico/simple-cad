@@ -46,6 +46,9 @@
   #topbar .title { font-weight: 700; font-size: 15px; color: var(--accent); margin-right: 4px; white-space: nowrap; }
   .group { display: flex; gap: 4px; align-items: center; }
   .sep { width: 1px; height: 24px; background: var(--line); margin: 0 2px; }
+  .menu { position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px; z-index: 60; min-width: 130px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  .menu button { display: block; width: 100%; text-align: left; background: none; color: var(--text); border: none; border-radius: 6px; padding: 8px 10px; font-size: 13px; cursor: pointer; }
+  .menu button:hover { background: var(--panel2); }
   button.tbtn {
     background: var(--panel2); color: var(--text); border: 1px solid var(--line);
     border-radius: 8px; min-width: 44px; height: 38px; padding: 0 8px;
@@ -187,10 +190,15 @@
       <button class="tbtn" id="btnSave" title="JSON保存">💾 保存</button>
       <button class="tbtn" id="btnLoad" title="JSON読込">📂 読込</button>
       <button class="tbtn" id="btnImg" title="画像を配置(トレース用)">🖼 画像</button>
-      <button class="tbtn" id="btnSvg" title="SVG書き出し">SVG</button>
-      <button class="tbtn" id="btnPng" title="PNG書き出し">PNG</button>
-      <button class="tbtn" id="btnPdf" title="PDF書き出し(実寸)">PDF</button>
-      <button class="tbtn" id="btnDxf" title="DXF書き出し(CAD相互運用)">DXF</button>
+      <span class="group" style="position:relative">
+        <button class="tbtn" id="btnExport" title="書き出し">⬇ 書出 ▾</button>
+        <div id="exportMenu" class="menu" style="display:none">
+          <button data-exp="svg">SVG (ベクター)</button>
+          <button data-exp="png">PNG (画像)</button>
+          <button data-exp="pdf">PDF (実寸)</button>
+          <button data-exp="dxf">DXF (CAD連携)</button>
+        </div>
+      </span>
     </div>
     <input type="file" id="fileInput" accept="application/json,.json" style="display:none">
     <input type="file" id="imgInput" accept="image/*" style="display:none">
@@ -1741,10 +1749,17 @@ document.getElementById('fileInput').onchange = e => {
   e.target.value = '';
 };
 
-document.getElementById('btnSvg').onclick = exportSVG;
-document.getElementById('btnPng').onclick = exportPNG;
-document.getElementById('btnPdf').onclick = exportPDF;
-document.getElementById('btnDxf').onclick = exportDXF;
+// 書き出しドロップダウン
+const exportMenu = document.getElementById('exportMenu');
+document.getElementById('btnExport').onclick = (e) => { e.stopPropagation(); exportMenu.style.display = exportMenu.style.display === 'none' ? 'block' : 'none'; };
+exportMenu.querySelectorAll('button[data-exp]').forEach(b => {
+  b.onclick = () => {
+    exportMenu.style.display = 'none';
+    const k = b.dataset.exp;
+    if (k === 'svg') exportSVG(); else if (k === 'png') exportPNG(); else if (k === 'pdf') exportPDF(); else if (k === 'dxf') exportDXF();
+  };
+});
+document.addEventListener('click', () => { exportMenu.style.display = 'none'; });
 
 // 画像配置(トレース用): 画像を読み込み、ビュー中央に実寸配置
 document.getElementById('btnImg').onclick = () => document.getElementById('imgInput').click();

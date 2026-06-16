@@ -869,6 +869,18 @@ const allGroups = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s 
 const uniqueGroups = await page.evaluate(() => [...new Set(window.SimpleCAD.state.shapes.map(s => s.group))].length);
 check('リロード後の新グループが既存と衝突しない(3グループ)', uniqueGroups === 3, JSON.stringify({ allGroups: allGroups, u: uniqueGroups }));
 
+// --- AN: 書き出しドロップダウン ---
+await page.evaluate(() => { window.SimpleCAD.clearAll(); document.getElementById('exportMenu').style.display = 'none'; });
+await page.evaluate(() => document.getElementById('btnExport').click());
+let menuDisp = await page.evaluate(() => document.getElementById('exportMenu').style.display);
+check('書出ボタンでメニューが開く', menuDisp === 'block', 'disp=' + menuDisp);
+const expItems = await page.evaluate(() => document.querySelectorAll('#exportMenu button[data-exp]').length);
+check('メニューに4つの書き出し項目', expItems === 4, 'n=' + expItems);
+// 項目クリックでメニューが閉じる
+await page.evaluate(() => document.querySelector('#exportMenu button[data-exp=svg]').click());
+menuDisp = await page.evaluate(() => document.getElementById('exportMenu').style.display);
+check('項目クリックでメニューが閉じる', menuDisp === 'none', 'disp=' + menuDisp);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
