@@ -696,6 +696,18 @@ await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.loadJS
 const dashSan = await page.evaluate(() => window.SimpleCAD.state.shapes[0].dash);
 check('不正な線種はsolidに矯正', dashSan === 'solid', 'dash=' + dashSan);
 
+// --- AE: カラースウォッチ ---
+const swCount = await page.evaluate(() => document.querySelectorAll('#swatches button').length);
+check('スウォッチが8色生成される', swCount === 8, 'n=' + swCount);
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'sw', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#000', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('sw');
+  document.querySelectorAll('#swatches button')[2].click(); // #ef4444
+});
+const swStroke = await page.evaluate(() => ({ shape: window.SimpleCAD.state.shapes[0].stroke, style: window.SimpleCAD.state.style.stroke }));
+check('スウォッチで選択図形と既定色が変わる', swStroke.shape === '#ef4444' && swStroke.style === '#ef4444', JSON.stringify(swStroke));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
