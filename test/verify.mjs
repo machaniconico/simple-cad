@@ -988,6 +988,21 @@ check('複数行テキストが作成される', mt && mt.text.split('\n').lengt
 const svgMt = await page.evaluate(() => window.SimpleCAD.buildSVGString());
 check('SVGに複数行のtspanが出る', (svgMt.match(/<tspan/g) || []).length === 3, '' + (svgMt.match(/<tspan/g) || []).length);
 
+// --- AV: 選択範囲のみ書き出し ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'x1', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#000', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'x2', type: 'circle', cx: 100, cy: 100, r: 20, stroke: '#000', strokeWidth: 1, fill: null });
+  document.getElementById('expSelOnly').checked = true;
+  window.SimpleCAD.select('x2'); // 円だけ選択
+});
+const svgSel = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('選択範囲のみ: SVGに円のみ(矩形なし)', svgSel.includes('<circle') && !svgSel.includes('<rect x'), svgSel.slice(0, 80));
+// 解除すると両方
+await page.evaluate(() => { document.getElementById('expSelOnly').checked = false; });
+const svgAll = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('解除で全図形(矩形+円)', svgAll.includes('<circle') && svgAll.includes('<rect x'), '');
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

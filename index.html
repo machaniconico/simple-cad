@@ -193,6 +193,7 @@
       <span class="group" style="position:relative">
         <button class="tbtn" id="btnExport" title="書き出し">⬇ 書出 ▾</button>
         <div id="exportMenu" class="menu" style="display:none">
+          <label style="display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:12px;color:var(--muted);cursor:pointer"><input type="checkbox" id="expSelOnly"> 選択範囲のみ</label>
           <button data-exp="svg">SVG (ベクター)</button>
           <button data-exp="png">PNG (画像)</button>
           <button data-exp="pdf">PDF (実寸)</button>
@@ -2162,7 +2163,7 @@ function exportSVG() {
 }
 // SVG文字列を生成（純関数・テスト容易化のため分離）
 function buildSVGString() {
-  const shapes = state.shapes.filter(isVisible); // 非表示レイヤーは除外
+  const shapes = exportShapes(); // 可視(+選択範囲のみ)
   const e = computeExtent(shapes);
   if (!e) return '';
   const { minX, minY, maxX, maxY } = e;
@@ -2228,10 +2229,16 @@ function exportPNG() {
   off.toBlob(b => downloadBlob(b, 'drawing.png'));
 }
 
+// 書き出し対象の図形(可視。「選択範囲のみ」ONかつ選択ありなら選択図形に限定)
+function exportShapes() {
+  const onlySel = document.getElementById('expSelOnly') && document.getElementById('expSelOnly').checked && state.selection.size > 0;
+  return state.shapes.filter(s => isVisible(s) && (!onlySel || state.selection.has(s.id)));
+}
+
 // ---- DXF書き出し（R12 ASCII・依存なし。他CADとの相互運用用）----
 // DXFはY軸が上向きなので符号反転。回転はrot考慮で頂点を実座標化してから出力。
 function buildDXF() {
-  const shapes = state.shapes.filter(isVisible);
+  const shapes = exportShapes();
   if (!shapes.length) return '';
   const out = [];
   const e = (c, v) => { out.push(String(c)); out.push(String(v)); };
@@ -2283,7 +2290,7 @@ function exportDXF() {
 
 // ---- PDF書き出し（実寸・依存なし。SVGを高解像度ラスタライズしFlateで埋め込み）----
 function drawingExtentMM() {
-  const e = computeExtent(state.shapes.filter(isVisible));
+  const e = computeExtent(exportShapes());
   if (!e) return null;
   const pad = 5;
   return { Wmm: (e.maxX - e.minX) + pad * 2, Hmm: (e.maxY - e.minY) + pad * 2 };
