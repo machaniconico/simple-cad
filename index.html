@@ -225,6 +225,7 @@
       <button class="tool" data-tool="polygon" title="正多角形">⬡<span class="lbl">多角</span></button>
       <button class="tool" data-tool="text" title="文字">A<span class="lbl">文字</span></button>
       <button class="tool" data-tool="dim" title="寸法線">↔<span class="lbl">寸法</span></button>
+      <button class="tool" data-tool="angle" title="角度寸法(頂点→2辺)">∠<span class="lbl">角度</span></button>
       <button class="tool" data-tool="erase" title="削除">⌫<span class="lbl">削除</span></button>
     </div>
 
@@ -339,7 +340,8 @@
         <h2>📐 SimpleCAD の使い方</h2>
         <h3>ツール（キー）</h3>
         <ul>
-          <li>選択 <b>V</b> / 線 <b>L</b> / 矩形 <b>R</b> / 円 <b>C</b> / 楕円 <b>O</b> / 連線 <b>P</b> / 文字 <b>T</b> / 寸法 <b>M</b> / 削除 <b>E</b></li>
+          <li>選択 <b>V</b> / 線 <b>L</b> / 矩形 <b>R</b> / 円 <b>C</b> / 楕円 <b>O</b> / 連線 <b>P</b> / 文字 <b>T</b> / 寸法 <b>M</b> / 角度 <b>A</b> / 削除 <b>E</b></li>
+          <li>角度寸法: 頂点→1辺目→2辺目の3クリック。文字は選択中にプロパティ欄で左/中央/右に整列</li>
           <li>画面フィット <b>F</b> / ヘルプ <b>?</b></li>
           <li>正多角形は左パレットの ⬡（辺数は右パネル）</li>
         </ul>
@@ -435,6 +437,7 @@ function ensureLayers() {
 let draft = null;          // 線/矩形/円/寸法の作図中データ
 let polyPts = null;        // ポリライン作図中の点列
 let arcDraft = null;       // 円弧作図中 {cx,cy,r,a0,a1,stage}
+let angleDraft = null;     // 角度寸法作図中 {vx,vy,x1,y1,x2,y2,stage}
 let dragMove = null;       // 選択移動中 {ids, startWorld, orig:Map}
 let handleDrag = null;     // 変形(リサイズ/回転)中
 let marquee = null;        // 範囲選択ドラッグ {x0,y0,x1,y1(world), add}
@@ -554,6 +557,20 @@ function snapToObjects(w) {
         const n = s.points[i + 1] || (s.closed ? s.points[0] : null); // 辺中点
         if (n) consider((s.points[i].x + n.x) / 2, (s.points[i].y + n.y) / 2);
       }
+    } else if (s.type === 'arc') {
+      consider(s.cx, s.cy); // 中心
+      consider(s.cx + s.r * Math.cos(s.a0), s.cy + s.r * Math.sin(s.a0)); // 始点
+      consider(s.cx + s.r * Math.cos(s.a1), s.cy + s.r * Math.sin(s.a1)); // 終点
+      let mid = s.a1 - s.a0; if (mid < 0) mid += 2 * Math.PI; mid = s.a0 + mid / 2;
+      consider(s.cx + s.r * Math.cos(mid), s.cy + s.r * Math.sin(mid)); // 弧中点
+    } else if (s.type === 'angle') {
+      consider(s.vx, s.vy); consider(s.x1, s.y1); consider(s.x2, s.y2);
+    } else if (s.type === 'text' || s.type === 'image') {
+      const b = bbox(s);
+      if (b) {
+        consider(b.x, b.y); consider(b.x + b.w, b.y); consider(b.x, b.y + b.h); consider(b.x + b.w, b.y + b.h);
+        consider(b.x + b.w / 2, b.y + b.h / 2);
+      }
     }
   }
   return best;
@@ -575,11 +592,33 @@ const isNum = v => Number.isFinite(+v);
 const num = (v, d = 0) => (isNum(v) ? +v : d);
 // 画像dataURLは base64 形式のみ許可(base64の文字集合に " < > は無く属性ブレイクアウト不能)
 const DATAURL_IMG = /^data:image\/(png|jpeg|jpg|gif|webp|bmp|svg\+xml)(;[a-zA-Z0-9.+=\-]+)*;base64,[A-Za-z0-9+/]+={0,2}$/;
-// 色は #hex / none / 基本色名 のみ許可。不正は既定値へ
+// 色は #hex(3/4/6/8桁) / none / transparent / currentColor / CSS標準色名 のみ許可。
+// 任意の英単語を弾き、属性インジェクション源を最小化(以前は[a-zA-Z]{3,20}を素通ししていた)
+const CSS_NAMED_COLORS = new Set(('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue '
+  + 'blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue '
+  + 'darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid '
+  + 'darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink '
+  + 'deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold '
+  + 'goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush '
+  + 'lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey '
+  + 'lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime '
+  + 'limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen '
+  + 'mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin '
+  + 'navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise '
+  + 'palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue '
+  + 'saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow '
+  + 'springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen '
+  // CSS システムカラー(以前の素通し正規表現で受理されていた値の機能後退防止)
+  + 'canvas canvastext linktext visitedtext activetext buttonface buttontext buttonborder field fieldtext '
+  + 'highlight highlighttext selecteditem selecteditemtext mark marktext graytext accentcolor accentcolortext').split(' '));
 function safeColor(v, fallback) {
   if (v == null) return fallback;
   const s = String(v);
-  return /^(#[0-9a-fA-F]{3,8}|none|[a-zA-Z]{3,20})$/.test(s) ? s : fallback;
+  if (/^#[0-9a-fA-F]{3,8}$/.test(s)) return s;
+  const low = s.toLowerCase();
+  // キーワードは正規化した小文字を返す(SVG属性の大小不一致を避ける)
+  if (low === 'none' || low === 'transparent' || low === 'currentcolor') return low;
+  return CSS_NAMED_COLORS.has(low) ? low : fallback;
 }
 function sanitizeShape(s) {
   if (!s || typeof s !== 'object') return null;
@@ -608,8 +647,11 @@ function sanitizeShape(s) {
     case 'polyline':
       if (!Array.isArray(s.points) || !s.points.length) return null;
       return { ...base, type: 'polyline', closed: !!s.closed, points: s.points.map(p => ({ x: num(p && p.x), y: num(p && p.y) })) };
+    case 'angle':
+      return { ...base, type: 'angle', vx: num(s.vx), vy: num(s.vy), x1: num(s.x1), y1: num(s.y1), x2: num(s.x2), y2: num(s.y2) };
     case 'text':
-      return { ...base, type: 'text', x: num(s.x), y: num(s.y), fontSize: Math.max(1, num(s.fontSize, 16)), text: String(s.text == null ? '' : s.text).slice(0, 5000) };
+      return { ...base, type: 'text', x: num(s.x), y: num(s.y), fontSize: Math.max(1, num(s.fontSize, 16)),
+        align: ['left', 'center', 'right'].includes(s.align) ? s.align : 'left', text: String(s.text == null ? '' : s.text).slice(0, 5000) };
     case 'image':
       // srcは data:image/...;base64, のみ許可(XSS/属性ブレイクアウト防止)
       if (!DATAURL_IMG.test(String(s.src || ''))) return null;
@@ -668,6 +710,7 @@ function draw() {
   if (draft) drawDraft();
   if (polyPts) drawPolyDraft();
   if (arcDraft) drawArcDraft();
+  if (angleDraft) drawAngleDraft();
   if (marquee) drawMarquee();
   // クロスヘア(マウス操作・作図ツール時)
   if (hoverScreen && !coarsePointer && state.tool !== 'select' && state.tool !== 'erase') {
@@ -782,13 +825,19 @@ function drawShape(s, selected) {
     }
   } else if (s.type === 'dim') {
     drawDimension(s);
+  } else if (s.type === 'angle') {
+    drawAngle(s);
   } else if (s.type === 'text') {
     ctx.fillStyle = s.stroke || '#e2e8f0';
     ctx.font = (s.fontSize * state.view.scale) + 'px system-ui, "Noto Sans JP", sans-serif';
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    const align = s.align || 'left';
+    ctx.textAlign = align; ctx.textBaseline = 'top';
+    // alignに応じてアンカーX(左/中央/右)。boxはs.x..s.x+幅で固定しbbox整合を保つ
+    const bw = align === 'left' ? 0 : textSize(s).w;
+    const anchorX = W2Sx(s.x + (align === 'center' ? bw / 2 : align === 'right' ? bw : 0));
     const lines = String(s.text || '').split('\n');
     const lh = s.fontSize * 1.25 * state.view.scale;
-    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], W2Sx(s.x), W2Sy(s.y) + i * lh);
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], anchorX, W2Sy(s.y) + i * lh);
   } else if (s.type === 'image') {
     const img = getImg(s.src);
     if (img && img.complete && img.naturalWidth) {
@@ -839,6 +888,57 @@ function drawDimension(s) {
   ctx.fillRect(mx - tw / 2 - 4, my - 18, tw + 8, 16);
   ctx.fillStyle = s.stroke || '#fbbf24';
   ctx.fillText(label, mx, my - 4);
+}
+
+// 角度寸法の幾何(world)。頂点vから2辺へのレイ、内角(0〜180°)、円弧半径・掃引角。
+// W2Sは反転なしのアフィン変換なのでworld角度=画面角度。
+function angleGeom(s) {
+  const v1x = s.x1 - s.vx, v1y = s.y1 - s.vy, v2x = s.x2 - s.vx, v2y = s.y2 - s.vy;
+  const l1 = Math.hypot(v1x, v1y), l2 = Math.hypot(v2x, v2y);
+  const a0 = Math.atan2(v1y, v1x), a1 = Math.atan2(v2y, v2x);
+  let diff = a1 - a0;                       // 短い側(内角)へ正規化
+  while (diff <= -Math.PI) diff += 2 * Math.PI;
+  while (diff > Math.PI) diff -= 2 * Math.PI;
+  const r = Math.max(0.001, Math.min(l1, l2) * 0.5);
+  return { a0, a1, diff, r, deg: Math.abs(diff) * 180 / Math.PI, bis: a0 + diff / 2, acw: diff < 0, l1, l2 };
+}
+// 角度寸法の円弧サンプル点(SVG/DXF出力用。回転はarc同様に点列を事前回転)
+function angleArcPoints(s) {
+  const g = angleGeom(s);
+  const seg = Math.max(2, Math.ceil(Math.abs(g.diff) / (Math.PI / 32)));
+  const c = s.rot ? shapeCenter(s) : null;
+  const pts = [];
+  for (let i = 0; i <= seg; i++) {
+    const a = g.a0 + g.diff * (i / seg);
+    let x = s.vx + g.r * Math.cos(a), y = s.vy + g.r * Math.sin(a);
+    if (c) { const rp = rotatePt(x, y, c.x, c.y, s.rot); x = rp.x; y = rp.y; }
+    pts.push({ x, y });
+  }
+  return pts;
+}
+// 角度寸法描画(2辺+内角円弧+度数ラベル)。回転は外側のctx回転ラップに追従
+function drawAngle(s) {
+  const g = angleGeom(s);
+  const vx = W2Sx(s.vx), vy = W2Sy(s.vy);
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = s.stroke || '#fbbf24';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(vx, vy); ctx.lineTo(W2Sx(s.x1), W2Sy(s.y1));
+  ctx.moveTo(vx, vy); ctx.lineTo(W2Sx(s.x2), W2Sy(s.y2));
+  ctx.stroke();
+  const R = g.r * state.view.scale;
+  ctx.beginPath(); ctx.arc(vx, vy, R, g.a0, g.a1, g.acw); ctx.stroke();
+  const lx = vx + Math.cos(g.bis) * (R + 14), ly = vy + Math.sin(g.bis) * (R + 14);
+  const label = g.deg.toFixed(1) + '°';
+  ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(15,23,42,0.85)';
+  ctx.fillRect(lx - tw / 2 - 4, ly - 9, tw + 8, 18);
+  ctx.fillStyle = s.stroke || '#fbbf24';
+  ctx.fillText(label, lx, ly);
+  ctx.restore();
 }
 
 // 選択点線枠(回転追従)。ハンドルは drawHandles で別途
@@ -982,11 +1082,12 @@ function fieldsFor(s) {
   if (s.type === 'ellipse') return [['cx', '中心X'], ['cy', '中心Y'], ['rx', '横半径'], ['ry', '縦半径']];
   if (s.type === 'arc') return [['cx', '中心X'], ['cy', '中心Y'], ['r', '半径']];
   if (s.type === 'text') return [['x', 'X'], ['y', 'Y'], ['fontSize', '字高']];
+  if (s.type === 'angle') return [['vx', '頂点X'], ['vy', '頂点Y']];
   if (s.type === 'image') return [['x', 'X'], ['y', 'Y'], ['w', '幅'], ['h', '高さ'], ['opacity', '不透明度']];
   if (s.type === 'polyline') return []; // 編集欄は無いが計測情報は表示
   return null;
 }
-const jpType = t => ({ line: '線分', dim: '寸法', rect: '矩形', circle: '円', ellipse: '楕円', arc: '円弧', polyline: 'ポリライン', text: 'テキスト', image: '画像' }[t] || t);
+const jpType = t => ({ line: '線分', dim: '寸法', angle: '角度寸法', rect: '矩形', circle: '円', ellipse: '楕円', arc: '円弧', polyline: 'ポリライン', text: 'テキスト', image: '画像' }[t] || t);
 // 円/楕円に半径寸法(中心→右端のdim)を追加
 function addRadiusDim(s) {
   const r = s.type === 'circle' ? s.r : s.rx;
@@ -998,6 +1099,7 @@ function addRadiusDim(s) {
 function measureInfo(s) {
   const f1 = v => v.toFixed(1);
   if (s.type === 'line' || s.type === 'dim') return '長さ ' + f1(Math.hypot(s.x2 - s.x1, s.y2 - s.y1)) + ' mm';
+  if (s.type === 'angle') return '角度 ' + angleGeom(s).deg.toFixed(1) + '°';
   if (s.type === 'rect') return '面積 ' + f1(Math.abs(s.w * s.h)) + ' mm² / 周 ' + f1(2 * (Math.abs(s.w) + Math.abs(s.h))) + ' mm';
   if (s.type === 'circle') return '面積 ' + f1(Math.PI * s.r * s.r) + ' mm² / 円周 ' + f1(2 * Math.PI * s.r) + ' mm';
   if (s.type === 'ellipse') return '面積 ' + f1(Math.PI * s.rx * s.ry) + ' mm²';
@@ -1042,6 +1144,17 @@ function buildNumPanel(s, fields) {
     inp.addEventListener('change', () => pushHistory());
     row.append(document.createTextNode('本文 '), inp);
     numProps.appendChild(row);
+    // 整列(左/中央/右)トグル
+    const arow = document.createElement('div'); arow.style.cssText = 'display:flex;gap:4px;margin-top:4px';
+    const setAlign = av => { const cur = selectedShape(); if (!cur) return; cur.align = av; pushHistory(); draw(); buildNumPanel(cur, fieldsFor(cur)); };
+    for (const [av, lbl] of [['left', '⬅'], ['center', '⬌'], ['right', '➡']]) {
+      const bt = document.createElement('button'); bt.textContent = lbl; bt.title = '整列: ' + av;
+      bt.style.cssText = 'flex:1;height:28px;border-radius:6px;border:1px solid var(--line);cursor:pointer;font-size:13px;'
+        + ((s.align || 'left') === av ? 'background:var(--accent2);color:#001' : 'background:var(--panel2);color:var(--text)');
+      bt.onclick = () => setAlign(av);
+      arow.appendChild(bt);
+    }
+    numProps.appendChild(arow);
   }
   for (const [key, label] of fields) {
     const row = document.createElement('label');
@@ -1098,6 +1211,17 @@ function syncNumValues(s) {
 function bbox(s) {
   if (s.type === 'line' || s.type === 'dim')
     return { x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2), w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1) };
+  if (s.type === 'angle') {
+    const g = angleGeom(s);
+    const xs = [s.vx, s.x1, s.x2], ys = [s.vy, s.y1, s.y2];
+    const lr = g.r + 4; // 円弧(半径g.r)とラベル(g.r+4)の張り出しを内角の掃引に沿って取り込む
+    const n = 8;
+    for (let i = 0; i <= n; i++) {
+      const a = g.a0 + g.diff * (i / n);
+      xs.push(s.vx + lr * Math.cos(a)); ys.push(s.vy + lr * Math.sin(a));
+    }
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  }
   if (s.type === 'rect') return { x: s.x, y: s.y, w: s.w, h: s.h };
   if (s.type === 'circle') return { x: s.cx - s.r, y: s.cy - s.r, w: s.r * 2, h: s.r * 2 };
   if (s.type === 'ellipse') return { x: s.cx - s.rx, y: s.cy - s.ry, w: s.rx * 2, h: s.ry * 2 };
@@ -1138,6 +1262,16 @@ function hitTest(wx, wy) {
     if (s.rot) { const c = shapeCenter(s); const lp = rotatePt(wx, wy, c.x, c.y, -s.rot); qx = lp.x; qy = lp.y; }
     if (s.type === 'line' || s.type === 'dim') {
       if (distToSeg(qx, qy, s.x1, s.y1, s.x2, s.y2) < thr) return s;
+    } else if (s.type === 'angle') {
+      if (distToSeg(qx, qy, s.vx, s.vy, s.x1, s.y1) < thr || distToSeg(qx, qy, s.vx, s.vy, s.x2, s.y2) < thr) return s;
+      // 内角の円弧上もヒット対象に(半径が近く、掃引範囲内の角度)
+      const g = angleGeom(s);
+      if (Math.abs(Math.hypot(qx - s.vx, qy - s.vy) - g.r) < thr) {
+        let rel = Math.atan2(qy - s.vy, qx - s.vx) - g.a0;
+        while (rel > Math.PI) rel -= 2 * Math.PI;
+        while (rel <= -Math.PI) rel += 2 * Math.PI;
+        if (rel >= Math.min(0, g.diff) - 1e-6 && rel <= Math.max(0, g.diff) + 1e-6) return s;
+      }
     } else if (s.type === 'rect') {
       if (s.fill && qx >= s.x && qx <= s.x + s.w && qy >= s.y && qy <= s.y + s.h) return s;
       const edges = [[s.x, s.y, s.x + s.w, s.y], [s.x + s.w, s.y, s.x + s.w, s.y + s.h],
@@ -1218,6 +1352,9 @@ function scaleShapeAbout(s, ax, ay, sx, sy) {
   if (s.type === 'line' || s.type === 'dim') {
     const p1 = f(s.x1, s.y1), p2 = f(s.x2, s.y2);
     s.x1 = p1.x; s.y1 = p1.y; s.x2 = p2.x; s.y2 = p2.y;
+  } else if (s.type === 'angle') {
+    const pv = f(s.vx, s.vy), p1 = f(s.x1, s.y1), p2 = f(s.x2, s.y2);
+    s.vx = pv.x; s.vy = pv.y; s.x1 = p1.x; s.y1 = p1.y; s.x2 = p2.x; s.y2 = p2.y;
   } else if (s.type === 'rect' || s.type === 'image') {
     const p1 = f(s.x, s.y), p2 = f(s.x + s.w, s.y + s.h);
     s.x = Math.min(p1.x, p2.x); s.y = Math.min(p1.y, p2.y);
@@ -1247,6 +1384,7 @@ function translateShape(s, dx, dy) {
   else if (s.type === 'ellipse') { s.cx += dx; s.cy += dy; }
   else if (s.type === 'arc') { s.cx += dx; s.cy += dy; }
   else if (s.type === 'text' || s.type === 'image') { s.x += dx; s.y += dy; }
+  else if (s.type === 'angle') { s.vx += dx; s.vy += dy; s.x1 += dx; s.y1 += dy; s.x2 += dx; s.y2 += dy; }
   else if (s.type === 'polyline') for (const p of s.points) { p.x += dx; p.y += dy; }
 }
 
@@ -1419,6 +1557,7 @@ function onToolDown(p) {
   else if (t === 'ellipse') { draft = { type: 'ellipse', cx: w.x, cy: w.y, rx: 0, ry: 0, _ox: w.x, _oy: w.y }; }
   else if (t === 'polygon') { draft = { type: 'polygon', cx: w.x, cy: w.y, r: 0, sides: state.style.sides }; }
   else if (t === 'arc') { handleArcTap(w); }
+  else if (t === 'angle') { handleAngleTap(w); }
   else if (t === 'polyline') { handlePolyTap(w); }
   else if (t === 'text') { openTextEditor(w, null); }
   draw();
@@ -1518,6 +1657,7 @@ function onToolMove(p) {
   }
 
   if (arcDraft) { const w = resolvePoint(p.x, p.y); updateArcDraft(w); draw(); return; }
+  if (angleDraft) { const w = resolvePoint(p.x, p.y); updateAngleDraft(w); draw(); return; }
   if (!draft) {
     // 選択ツールでなければスナップマーカーだけ更新
     if (t !== 'select') { resolvePoint(p.x, p.y); draw(); }
@@ -1690,6 +1830,33 @@ function drawArcDraft() {
   showMeasure(W2Sx(arcDraft.cx), W2Sy(arcDraft.cy), 'r ' + arcDraft.r.toFixed(1));
 }
 
+// ---- 角度寸法作図(頂点→1辺目→2辺目の3クリック) ----
+function handleAngleTap(w) {
+  if (!angleDraft) { angleDraft = { vx: w.x, vy: w.y, x1: w.x, y1: w.y, x2: w.x, y2: w.y, stage: 1 }; return; }
+  if (angleDraft.stage === 1) {
+    angleDraft.x1 = w.x; angleDraft.y1 = w.y; angleDraft.x2 = w.x; angleDraft.y2 = w.y; angleDraft.stage = 2; return;
+  }
+  angleDraft.x2 = w.x; angleDraft.y2 = w.y;
+  const l1 = Math.hypot(angleDraft.x1 - angleDraft.vx, angleDraft.y1 - angleDraft.vy);
+  const l2 = Math.hypot(angleDraft.x2 - angleDraft.vx, angleDraft.y2 - angleDraft.vy);
+  if (l1 > 0.01 && l2 > 0.01) {
+    state.shapes.push({ id: uid(), type: 'angle', vx: angleDraft.vx, vy: angleDraft.vy,
+      x1: angleDraft.x1, y1: angleDraft.y1, x2: angleDraft.x2, y2: angleDraft.y2,
+      stroke: '#fbbf24', strokeWidth: 1.5, fill: null, dash: 'solid', layer: state.activeLayer });
+    pushHistory();
+  }
+  angleDraft = null;
+}
+function updateAngleDraft(w) {
+  if (!angleDraft) return;
+  if (angleDraft.stage === 1) { angleDraft.x1 = w.x; angleDraft.y1 = w.y; angleDraft.x2 = w.x; angleDraft.y2 = w.y; }
+  else { angleDraft.x2 = w.x; angleDraft.y2 = w.y; }
+}
+function drawAngleDraft() {
+  if (!angleDraft) return;
+  drawAngle({ vx: angleDraft.vx, vy: angleDraft.vy, x1: angleDraft.x1, y1: angleDraft.y1, x2: angleDraft.x2, y2: angleDraft.y2, stroke: '#fbbf24' });
+}
+
 document.getElementById('plDone').onclick = () => commitPoly(false);
 document.getElementById('plCancel').onclick = () => { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); draw(); };
 // ダブルタップ/ダブルクリック: ポリライン確定 or テキスト編集
@@ -1706,7 +1873,7 @@ cv.addEventListener('dblclick', e => {
 document.querySelectorAll('.tool').forEach(b => {
   b.addEventListener('click', () => {
     if (polyPts) commitPoly(false);
-    arcDraft = null;
+    arcDraft = null; angleDraft = null;
     document.querySelectorAll('.tool').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
     state.tool = b.dataset.tool;
@@ -2055,7 +2222,7 @@ function ungroupSelection() {
 }
 // ツールをキーで切替
 function activateTool(t) { const b = document.querySelector(`.tool[data-tool="${t}"]`); if (b) b.click(); }
-const TOOL_KEYS = { v: 'select', l: 'line', r: 'rect', c: 'circle', o: 'ellipse', p: 'polyline', t: 'text', m: 'dim', e: 'erase' };
+const TOOL_KEYS = { v: 'select', l: 'line', r: 'rect', c: 'circle', o: 'ellipse', p: 'polyline', t: 'text', m: 'dim', a: 'angle', e: 'erase' };
 // ===== 整列・分布 =====
 function alignSelection(mode) {
   const list = selectedShapesList(); if (list.length < 2) return;
@@ -2213,7 +2380,7 @@ window.addEventListener('keydown', e => {
   // ツール切替(単独キー)
   if (!mod && !e.altKey && TOOL_KEYS[e.key.toLowerCase()]) { e.preventDefault(); activateTool(TOOL_KEYS[e.key.toLowerCase()]); }
   if (e.key === 'Enter' && polyPts) commitPoly(false);
-  if (e.key === 'Escape') { if (helpEl.style.display !== 'none') { toggleHelp(false); return; } draft = null; arcDraft = null; if (polyPts) { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
+  if (e.key === 'Escape') { if (helpEl.style.display !== 'none') { toggleHelp(false); return; } draft = null; arcDraft = null; angleDraft = null; if (polyPts) { polyPts = null; document.getElementById('confirmBar').classList.remove('show'); } state.selection.clear(); draw(); }
 });
 window.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; if (e.key === 'Shift') shiftHeld = false; });
 
@@ -2290,9 +2457,9 @@ function buildSVGString() {
     const st = safeColor(s.stroke, '#000'), sw = (+s.strokeWidth || 1), fl = safeColor(s.fill, 'none');
     // 線種(寸法は常に実線)
     const da = (s.type !== 'dim' && s.dash === 'dashed') ? ' stroke-dasharray="5,3"' : (s.type !== 'dim' && s.dash === 'dotted') ? ' stroke-dasharray="0.6,2"' : '';
-    // 回転図形はグループに rotate transform を付与(arcはサンプリング時に回転済みのため除外)
+    // 回転図形はグループに rotate transform を付与(arc/angleはサンプリング時に回転済みのため除外)
     let gOpen = '', gClose = '';
-    if (s.rot && s.type !== 'arc') {
+    if (s.rot && s.type !== 'arc' && s.type !== 'angle') {
       const c = shapeCenter(s);
       gOpen = `<g transform="rotate(${(s.rot * 180 / Math.PI).toFixed(3)} ${esc(c.x - ox)} ${esc(c.y - oy)})">`;
       gClose = '</g>\n';
@@ -2317,12 +2484,30 @@ function buildSVGString() {
       const pts = s.points.map(p => `${esc(p.x - ox)},${esc(p.y - oy)}`).join(' ');
       const tag = s.closed ? 'polygon' : 'polyline';
       body += `<${tag} points="${pts}" stroke="${st}" stroke-width="${sw}" fill="${s.closed ? fl : 'none'}"${da}/>\n`;
+    } else if (s.type === 'angle') {
+      const c = s.rot ? shapeCenter(s) : null;
+      const rp = (x, y) => c ? rotatePt(x, y, c.x, c.y, s.rot) : { x, y };
+      const v = rp(s.vx, s.vy), p1 = rp(s.x1, s.y1), p2 = rp(s.x2, s.y2);
+      body += `<line x1="${esc(v.x - ox)}" y1="${esc(v.y - oy)}" x2="${esc(p1.x - ox)}" y2="${esc(p1.y - oy)}" stroke="${st}" stroke-width="${sw}"/>\n`;
+      body += `<line x1="${esc(v.x - ox)}" y1="${esc(v.y - oy)}" x2="${esc(p2.x - ox)}" y2="${esc(p2.y - oy)}" stroke="${st}" stroke-width="${sw}"/>\n`;
+      const apts = angleArcPoints(s).map(p => `${esc(p.x - ox)},${esc(p.y - oy)}`).join(' ');
+      body += `<polyline points="${apts}" stroke="${st}" stroke-width="${sw}" fill="none"/>\n`;
+      const g = angleGeom(s);
+      let lx = s.vx + Math.cos(g.bis) * (g.r + 4), ly = s.vy + Math.sin(g.bis) * (g.r + 4);
+      if (c) { const r = rotatePt(lx, ly, c.x, c.y, s.rot); lx = r.x; ly = r.y; }
+      // canvasはラベルも図形と一緒に傾くため、SVGでもラベルを同角度だけ回転させ一致させる
+      const labelRot = c ? ` transform="rotate(${(s.rot * 180 / Math.PI).toFixed(3)} ${esc(lx - ox)} ${esc(ly - oy)})"` : '';
+      body += `<text x="${esc(lx - ox)}" y="${esc(ly - oy)}"${labelRot} fill="${st}" font-size="10" text-anchor="middle">${g.deg.toFixed(1)}°</text>\n`;
     } else if (s.type === 'text') {
       const xe = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const fs = +s.fontSize || 16, lines = String(s.text || '').split('\n');
-      const tx = esc(s.x - ox);
+      const align = s.align || 'left';
+      const aw = align === 'left' ? 0 : textSize(s).w;
+      const ax = s.x + (align === 'center' ? aw / 2 : align === 'right' ? aw : 0);
+      const anchor = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
+      const tx = esc(ax - ox);
       const spans = lines.map((ln, i) => `<tspan x="${tx}" dy="${i === 0 ? 0 : esc(fs * 1.25)}">${xe(ln)}</tspan>`).join('');
-      body += `<text x="${tx}" y="${esc(s.y - oy)}" fill="${st}" font-size="${esc(fs)}" font-family="sans-serif" dominant-baseline="text-before-edge">${spans}</text>\n`;
+      body += `<text x="${tx}" y="${esc(s.y - oy)}" fill="${st}" font-size="${esc(fs)}" font-family="sans-serif" text-anchor="${anchor}" dominant-baseline="text-before-edge">${spans}</text>\n`;
     } else if (s.type === 'image') {
       // base64 data画像のみ埋め込む(厳格検証済みのみ。base64文字集合に引用符は無いが二重防御)
       if (DATAURL_IMG.test(s.src || '')) {
@@ -2406,9 +2591,23 @@ function buildDXF() {
       polylineLines(layer, s.points.map(p => tp(s, p.x, p.y)), s.closed);
     } else if (s.type === 'arc') {
       polylineLines(layer, arcSamplePoints(s), false);
+    } else if (s.type === 'angle') {
+      const v = tp(s, s.vx, s.vy), p1 = tp(s, s.x1, s.y1), p2 = tp(s, s.x2, s.y2);
+      line(layer, v.x, v.y, p1.x, p1.y);
+      line(layer, v.x, v.y, p2.x, p2.y);
+      polylineLines(layer, angleArcPoints(s), false); // angleArcPointsは回転済み
+      const g = angleGeom(s);
+      const lp = tp(s, s.vx + Math.cos(g.bis) * (g.r + 4), s.vy + Math.sin(g.bis) * (g.r + 4));
+      e(0, 'TEXT'); e(8, layer); e(10, fx(lp.x)); e(20, fy(lp.y)); e(40, fr(Math.max(2, g.r * 0.3))); e(1, g.deg.toFixed(1) + '°');
+      if (s.rot) e(50, (-s.rot * 180 / Math.PI).toFixed(2)); // 回転時はラベル向きも図形に合わせる
     } else if (s.type === 'text') {
-      const p = tp(s, s.x, s.y + s.fontSize); // DXF TEXTはベースライン基準
+      const align = s.align || 'left';
+      const aw = align === 'left' ? 0 : textSize(s).w;
+      const ax = s.x + (align === 'center' ? aw / 2 : align === 'right' ? aw : 0);
+      const p = tp(s, ax, s.y + s.fontSize); // DXF TEXTはベースライン基準
       e(0, 'TEXT'); e(8, layer); e(10, fx(p.x)); e(20, fy(p.y)); e(40, fr(s.fontSize || 16)); e(1, String(s.text || '').replace(/[\r\n\t]/g, ' '));
+      const just = align === 'center' ? 1 : align === 'right' ? 2 : 0;
+      if (just) { e(72, just); e(11, fx(p.x)); e(21, fy(p.y)); } // 水平揃え + 揃え基準点
       if (s.rot) e(50, (-s.rot * 180 / Math.PI).toFixed(2));
     }
     // image は DXF 非対応のためスキップ

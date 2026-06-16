@@ -1087,6 +1087,126 @@ check('全画面ボタンが存在する', await page.evaluate(() => !!document.
 await page.evaluate(() => document.getElementById('btnFull').click()); // 非対応環境でも例外を出さない
 check('全画面クリックで例外/エラーなし', true);
 
+// --- BC: テキスト整列(左/中央/右) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'tc', type: 'text', x: 0, y: 0, fontSize: 16, text: 'ABC', stroke: '#000' });
+});
+check('テキストの既定整列はleft', await page.evaluate(() => window.SimpleCAD.state.shapes[0].align) === 'left');
+await page.evaluate(() => { window.SimpleCAD.state.shapes[0].align = 'center'; window.SimpleCAD.draw(); });
+let svgAlign = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('整列centerでSVGがtext-anchor=middle', svgAlign.includes('text-anchor="middle"'), svgAlign.slice(svgAlign.indexOf('<text')).slice(0, 80));
+await page.evaluate(() => { window.SimpleCAD.state.shapes[0].align = 'right'; window.SimpleCAD.draw(); });
+svgAlign = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('整列rightでSVGがtext-anchor=end', svgAlign.includes('text-anchor="end"'));
+const dxfT = await page.evaluate(() => window.SimpleCAD.buildDXF());
+check('整列rightでDXFに水平揃えコード72=2', /\b72\b\r?\n\s*2\b/.test(dxfT) || dxfT.includes('\n72\n2'), 'has72=' + dxfT.includes('72'));
+// 整列はsanitize/loadJSONで保存復元される
+await page.evaluate(() => { const d = window.SimpleCAD.dumpJSON(); window.SimpleCAD.clearAll(); window.SimpleCAD.loadJSON(d); });
+check('整列rightが保存読込で復元', await page.evaluate(() => window.SimpleCAD.state.shapes[0].align) === 'right');
+// 不正なalignはleftへ
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.addShape({ id: 'tx', type: 'text', x: 0, y: 0, fontSize: 16, text: 'x', align: 'evil', stroke: '#000' }); });
+check('不正alignはleftにサニタイズ', await page.evaluate(() => window.SimpleCAD.state.shapes[0].align) === 'left');
+
+// --- BD: 角度寸法 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'an', type: 'angle', vx: 0, vy: 0, x1: 10, y1: 0, x2: 0, y2: 10, stroke: '#fbbf24', strokeWidth: 1.5, fill: null });
+  window.SimpleCAD.select('an');
+});
+check('角度寸法がaddShapeで生成', await page.evaluate(() => window.SimpleCAD.state.shapes[0]?.type) === 'angle');
+const angInfo = await page.evaluate(() => document.getElementById('npInfo')?.textContent || '');
+check('直交2辺の角度が90°表示', angInfo.includes('90.0°'), angInfo);
+const svgAn = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('角度寸法SVGに円弧polylineと度数', svgAn.includes('<polyline') && svgAn.includes('90.0°'), '');
+const dxfAn = await page.evaluate(() => window.SimpleCAD.buildDXF());
+check('角度寸法DXFにTEXTと度数', dxfAn.includes('TEXT') && dxfAn.includes('90.0°'));
+// 保存読込で復元
+await page.evaluate(() => { const d = window.SimpleCAD.dumpJSON(); window.SimpleCAD.clearAll(); window.SimpleCAD.loadJSON(d); });
+check('角度寸法が保存読込で復元', await page.evaluate(() => window.SimpleCAD.state.shapes[0]?.type) === 'angle' && (await page.evaluate(() => window.SimpleCAD.shapeCount())) === 1);
+// 3クリックで作図(ツール経由)
+{
+  const cbox = await canvas.boundingBox();
+  await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.setTool('angle'); window.SimpleCAD.state.grid.osnap = false; });
+  for (const [rx, ry] of [[220, 160], [290, 160], [220, 90]]) {
+    await page.mouse.move(cbox.x + rx, cbox.y + ry); await page.mouse.down(); await page.mouse.up();
+  }
+  check('角度ツール3クリックで角度寸法を作図', await page.evaluate(() => window.SimpleCAD.state.shapes.filter(s => s.type === 'angle').length) === 1);
+}
+
+// --- BE: safeColor をCSS名色allowlistへ厳格化 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'c1', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: 'javascript', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'c2', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: 'red', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'c3', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#a1b2c3', strokeWidth: 1, fill: null });
+});
+const cols = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => s.stroke));
+check('不正な英単語色は既定値へ(javascript→#38bdf8)', cols[0] === '#38bdf8', cols[0]);
+check('CSS標準色名は許可(red)', cols[1] === 'red');
+check('#hexは許可(#a1b2c3)', cols[2] === '#a1b2c3');
+
+// --- BF: スナップ拡充(arc中心/text角/image角) ---
+const snapTextCorner = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.grid.osnap = true; window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.addShape({ id: 'st', type: 'text', x: 50, y: 50, fontSize: 16, text: 'Hi', stroke: '#000' });
+  const v = window.SimpleCAD.state.view;
+  const r = window.SimpleCAD.resolvePoint(50 * v.scale + v.offsetX + 2, 50 * v.scale + v.offsetY + 2);
+  return r;
+});
+check('テキスト左上角に吸着', Math.abs(snapTextCorner.x - 50) < 0.5 && Math.abs(snapTextCorner.y - 50) < 0.5, JSON.stringify(snapTextCorner));
+const snapArcCenter = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.grid.osnap = true; window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.addShape({ id: 'sa', type: 'arc', cx: 30, cy: 40, r: 10, a0: 0, a1: 1.5, stroke: '#000', strokeWidth: 1, fill: null });
+  const v = window.SimpleCAD.state.view;
+  const r = window.SimpleCAD.resolvePoint(30 * v.scale + v.offsetX + 2, 40 * v.scale + v.offsetY - 2);
+  return r;
+});
+check('円弧中心に吸着', Math.abs(snapArcCenter.x - 30) < 0.5 && Math.abs(snapArcCenter.y - 40) < 0.5, JSON.stringify(snapArcCenter));
+
+// --- BG: 回転angleのSVGラベル(rotate付き・<g transform>無し) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'ar', type: 'angle', vx: 0, vy: 0, x1: 30, y1: 0, x2: 0, y2: 30, stroke: '#fbbf24', strokeWidth: 1.5, fill: null });
+  window.SimpleCAD.state.shapes[0].rot = Math.PI / 6; window.SimpleCAD.draw();
+});
+const svgAngRot = await page.evaluate(() => window.SimpleCAD.buildSVGString());
+check('回転angleはSVGで<g transform>を使わない', !svgAngRot.includes('<g transform'));
+check('回転angleラベルにrotate transformが付く', /<text[^>]*transform="rotate\(/.test(svgAngRot), '');
+
+// --- BH: bbox(angle)が円弧/ラベルの張り出しを含む ---
+const angExtH = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  // 鈍角(約170°): 3点のy範囲は狭いが円弧は二等分線方向へ大きく張り出す
+  const d = Math.PI / 180;
+  window.SimpleCAD.addShape({ id: 'ob', type: 'angle', vx: 0, vy: 0, x1: 100, y1: 0, x2: 100 * Math.cos(170 * d), y2: 100 * Math.sin(170 * d), stroke: '#fbbf24', strokeWidth: 1, fill: null });
+  return window.SimpleCAD.transformAPI.shapeExtent(window.SimpleCAD.state.shapes[0]).h;
+});
+check('鈍角angleのbboxが円弧張り出しを含む(高さ>40)', angExtH > 40, 'h=' + angExtH.toFixed(1));
+
+// --- BI: safeColor システム色/キーワード正規化 ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'sc1', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: 'CanvasText', strokeWidth: 1, fill: null });
+  window.SimpleCAD.addShape({ id: 'sc2', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: 'TRANSPARENT' });
+});
+const scCols = await page.evaluate(() => window.SimpleCAD.state.shapes.map(s => [s.stroke, s.fill]));
+check('CSSシステム色は許可(CanvasText→canvastext)', scCols[0][0] === 'canvastext', JSON.stringify(scCols[0]));
+check('色キーワードは小文字へ正規化(TRANSPARENT→transparent)', scCols[1][1] === 'transparent', JSON.stringify(scCols[1]));
+
+// --- BJ: 角度寸法の円弧上ヒット ---
+const arcHit = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'ah', type: 'angle', vx: 0, vy: 0, x1: 40, y1: 0, x2: 0, y2: 40, stroke: '#fbbf24', strokeWidth: 1.5, fill: null });
+  // 半径20・45°方向の円弧上の点(どちらの辺からも離れている)
+  const p = 20 / Math.SQRT2;
+  const hit = window.SimpleCAD.hitTest(p, p);
+  return hit ? hit.type : null;
+});
+check('角度寸法の円弧上をクリックで選択できる', arcHit === 'angle', 'hit=' + arcHit);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
