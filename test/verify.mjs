@@ -921,6 +921,21 @@ check('解除でlockedが消える', await page.evaluate(() => !window.SimpleCAD
 await page.evaluate(() => { window.SimpleCAD.select('lk'); window.SimpleCAD.editAPI.nudge(10, 0); });
 check('解除後は微動で動く', await page.evaluate(() => window.SimpleCAD.state.shapes[0].x) === lx0 + 10);
 
+// --- AQ: スナップ対象の拡充(辺中点・楕円) ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.state.grid.osnap = true; window.SimpleCAD.state.grid.snap = false;
+  window.SimpleCAD.state.view = { scale: 2, offsetX: 0, offsetY: 0 };
+  window.SimpleCAD.addShape({ id: 'sn', type: 'rect', x: 0, y: 0, w: 100, h: 60, stroke: '#fff', strokeWidth: 1, fill: null });
+});
+// 上辺中点(50,0)付近(53,3)を resolvePoint → (50,0)へ吸着
+const snapMid = await page.evaluate(() => window.SimpleCAD.resolvePoint(53 * 2, 3 * 2));
+check('矩形の辺中点にスナップ', Math.abs(snapMid.x - 50) < 0.01 && Math.abs(snapMid.y - 0) < 0.01, JSON.stringify(snapMid));
+// 楕円の四分点
+await page.evaluate(() => { window.SimpleCAD.clearAll(); window.SimpleCAD.addShape({ id: 'se', type: 'ellipse', cx: 100, cy: 100, rx: 40, ry: 20, stroke: '#fff', strokeWidth: 1, fill: null }); });
+const snapEl = await page.evaluate(() => window.SimpleCAD.resolvePoint((140 + 2) * 2, 100 * 2)); // 右四分点(140,100)
+check('楕円の四分点にスナップ', Math.abs(snapEl.x - 140) < 0.01 && Math.abs(snapEl.y - 100) < 0.01, JSON.stringify(snapEl));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
