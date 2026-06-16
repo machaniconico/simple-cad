@@ -2752,26 +2752,37 @@ function exportDXF() {
 // 取り込み(DXF R12 / SVG → 図形)。DXFはY軸が上向きなので符号反転。
 // 生成図形は必ず sanitizeShape を通してから state へ追加(XSS/proto/型の防御)。
 // =========================================================================
+// AutoCAD Color Index(代表色)。256=ByLayer/0=ByBlockは既定色へ
+const DXF_ACI = { 1: '#ff0000', 2: '#ffff00', 3: '#00ff00', 4: '#00ffff', 5: '#0000ff', 6: '#ff00ff', 7: '#000000', 8: '#808080', 9: '#c0c0c0' };
+// DXFエンティティの色: trueColor(420, 24bit) 優先、無ければ ACI(62)、無ければ既定。
+function dxfColor(c) {
+  const t = c[420] && c[420][0];
+  if (t != null) { const v = parseInt(t, 10); if (Number.isFinite(v)) { const r = (v >> 16) & 255, gr = (v >> 8) & 255, b = v & 255; return '#' + [r, gr, b].map(n => n.toString(16).padStart(2, '0')).join(''); } }
+  const a = c[62] && c[62][0];
+  if (a != null) { const aci = parseInt(a, 10); if (DXF_ACI[aci]) return DXF_ACI[aci]; }
+  return '#000';
+}
 function dxfToShape(type, c) {
   const g = (code, idx = 0) => { const a = c[code]; return a && a[idx] != null ? a[idx] : undefined; };
   const nf = (code, idx = 0, d = 0) => { const v = parseFloat(g(code, idx)); return Number.isFinite(v) ? v : d; };
-  if (type === 'LINE') return { type: 'line', x1: nf(10), y1: -nf(20), x2: nf(11), y2: -nf(21), stroke: '#000' };
-  if (type === 'CIRCLE') return { type: 'circle', cx: nf(10), cy: -nf(20), r: nf(40), stroke: '#000', fill: null };
+  const stroke = dxfColor(c);
+  if (type === 'LINE') return { type: 'line', x1: nf(10), y1: -nf(20), x2: nf(11), y2: -nf(21), stroke };
+  if (type === 'CIRCLE') return { type: 'circle', cx: nf(10), cy: -nf(20), r: nf(40), stroke, fill: null };
   if (type === 'ARC') {
     let s = nf(50), e = nf(51); if (e < s) e += 360; // DXFはCCW(0..360)。Y反転で角度は符号反転
-    return { type: 'arc', cx: nf(10), cy: -nf(20), r: nf(40), a0: -e * Math.PI / 180, a1: -s * Math.PI / 180, stroke: '#000', fill: null };
+    return { type: 'arc', cx: nf(10), cy: -nf(20), r: nf(40), a0: -e * Math.PI / 180, a1: -s * Math.PI / 180, stroke, fill: null };
   }
   if (type === 'TEXT' || type === 'MTEXT') {
     const h = nf(40, 0, 16); // nfが欠落時16を返す。明示的な0も尊重(|| 16だと0が16化する)
     const txt = ((c[1] || []).join('') || (c[3] || []).join('')).replace(/\\P|\\[A-Za-z][^;]*;|[{}]/g, ''); // MTEXT制御コード除去
     const just = parseInt(g(72) || '0', 10) || 0;
-    return { type: 'text', x: nf(10), y: -nf(20) - h, fontSize: h, text: txt, align: just === 1 ? 'center' : just === 2 ? 'right' : 'left', stroke: '#000' };
+    return { type: 'text', x: nf(10), y: -nf(20) - h, fontSize: h, text: txt, align: just === 1 ? 'center' : just === 2 ? 'right' : 'left', stroke };
   }
   if (type === 'LWPOLYLINE') {
     const xs = c[10] || [], ys = c[20] || [], pts = [];
     for (let i = 0; i < Math.min(xs.length, ys.length); i++) { const x = parseFloat(xs[i]), y = parseFloat(ys[i]); if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y: -y }); }
     if (pts.length < 2) return null;
-    return { type: 'polyline', points: pts, closed: (parseInt(g(70) || '0', 10) & 1) === 1, stroke: '#000', fill: null };
+    return { type: 'polyline', points: pts, closed: (parseInt(g(70) || '0', 10) & 1) === 1, stroke, fill: null };
   }
   return null;
 }
@@ -2781,13 +2792,13 @@ function parseDXF(text) {
   for (let i = 0; i + 1 < ls.length; i += 2) { const code = parseInt(ls[i].trim(), 10); if (!Number.isNaN(code)) pairs.push([code, ls[i + 1]]); }
   const shapes = [];
   let cur = null, curType = null, poly = null;
-  const finishPoly = () => { if (poly && poly.pts.length >= 2) shapes.push({ type: 'polyline', points: poly.pts, closed: poly.closed, stroke: '#000', fill: null }); poly = null; };
+  const finishPoly = () => { if (poly && poly.pts.length >= 2) shapes.push({ type: 'polyline', points: poly.pts, closed: poly.closed, stroke: poly.stroke || '#000', fill: null }); poly = null; };
   const flush = () => {
     if (!cur) return;
     if (curType === 'VERTEX') {
       if (poly) { const x = parseFloat((cur[10] || [])[0]), y = parseFloat((cur[20] || [])[0]); if (Number.isFinite(x) && Number.isFinite(y)) poly.pts.push({ x, y: -y }); }
     } else if (curType === 'POLYHEAD') {
-      if (poly) poly.closed = (parseInt((cur[70] || ['0'])[0], 10) & 1) === 1;
+      if (poly) { poly.closed = (parseInt((cur[70] || ['0'])[0], 10) & 1) === 1; poly.stroke = dxfColor(cur); }
     } else {
       const sh = dxfToShape(curType, cur); if (sh) shapes.push(sh);
     }

@@ -1390,6 +1390,18 @@ const noneStroke = await page.evaluate(() => {
 });
 check('SVG stroke=noneは塗り色に矯正', noneStroke && noneStroke.stroke === '#ff0000', JSON.stringify(noneStroke));
 
+// --- CC: DXF取り込みの色(ACI 62 / trueColor 420) ---
+const dxfCol = await page.evaluate(() => {
+  const dxf = ['0', 'SECTION', '2', 'ENTITIES',
+    '0', 'LINE', '8', '0', '62', '1', '10', '0', '20', '0', '11', '10', '21', '0',
+    '0', 'CIRCLE', '8', '0', '420', '65280', '10', '5', '20', '5', '40', '3',
+    '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const out = window.SimpleCAD.parseDXF(dxf);
+  return { line: out[0] && out[0].stroke, circle: out[1] && out[1].stroke };
+});
+check('DXF ACI色(62=1→赤)を取り込む', dxfCol.line === '#ff0000', JSON.stringify(dxfCol));
+check('DXF trueColor(420→緑)を取り込む', dxfCol.circle === '#00ff00', JSON.stringify(dxfCol));
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
