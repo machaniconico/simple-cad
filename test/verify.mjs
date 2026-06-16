@@ -898,6 +898,29 @@ await page.evaluate(() => { window.SimpleCAD.setTool('select'); window.SimpleCAD
 const selSum = await colSum();
 check('選択ツールではクロスヘアが出ない', selSum === 0, 'sum=' + selSum);
 
+// --- AP: 個別図形ロック ---
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'lk', type: 'rect', x: 10, y: 10, w: 20, h: 20, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('lk');
+  window.SimpleCAD.lockAPI.toggle();
+});
+check('ロックでlocked=trueになる', await page.evaluate(() => window.SimpleCAD.state.shapes[0].locked === true));
+// ロック中は微動で動かない
+const lx0 = await page.evaluate(() => window.SimpleCAD.state.shapes[0].x);
+await page.evaluate(() => window.SimpleCAD.editAPI.nudge(10, 0));
+check('ロック図形は微動で動かない', await page.evaluate(() => window.SimpleCAD.state.shapes[0].x) === lx0);
+// ロック中は削除されない
+await page.evaluate(() => { window.SimpleCAD.select('lk'); window.SimpleCAD.editAPI && null; });
+await page.evaluate(() => window.SimpleCAD.state.selection.add('lk'));
+await page.evaluate(() => { const ev = new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }); window.dispatchEvent(ev); });
+check('ロック図形はDeleteで消えない', await page.evaluate(() => window.SimpleCAD.shapeCount()) === 1);
+// 解除すると動く・消せる
+await page.evaluate(() => { window.SimpleCAD.select('lk'); window.SimpleCAD.lockAPI.toggle(); });
+check('解除でlockedが消える', await page.evaluate(() => !window.SimpleCAD.state.shapes[0].locked));
+await page.evaluate(() => { window.SimpleCAD.select('lk'); window.SimpleCAD.editAPI.nudge(10, 0); });
+check('解除後は微動で動く', await page.evaluate(() => window.SimpleCAD.state.shapes[0].x) === lx0 + 10);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 

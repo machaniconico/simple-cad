@@ -277,6 +277,7 @@
             <button data-act="array" title="配列複製(行×列)">▦ 配列</button>
             <button data-act="group" title="グループ化 (Ctrl+G)">⛶ 群化</button>
             <button data-act="ungroup" title="グループ解除 (Ctrl+Shift+G)">⛶̷ 解除</button>
+            <button data-act="lock" title="ロック/解除">🔒 施錠</button>
           </div>
         </div>
         <div id="orderBox" style="display:none">
@@ -404,6 +405,8 @@ function getLayer(id) { return state.layers.find(l => l.id === id) || null; }
 function layerOf(s) { return getLayer(s.layer) || state.layers[0]; }
 function isVisible(s) { const l = layerOf(s); return !l || l.visible; }
 function isLocked(s) { const l = layerOf(s); return l ? l.locked : false; }
+// 図形が編集保護されているか(個別ロック or レイヤーロック)
+function isShapeLocked(s) { return !!(s && (s.locked || isLocked(s))); }
 // データ整合性: レイヤーが空なら既定を作り、layer未指定の図形を割り当てる
 function ensureLayers() {
   if (!state.layers || !state.layers.length) {
@@ -569,6 +572,7 @@ function sanitizeShape(s) {
     rot: num(s.rot, 0),
   };
   if (s.group != null) base.group = String(s.group).slice(0, 40);
+  if (s.locked) base.locked = true;
   switch (s.type) {
     case 'line': case 'dim':
       return { ...base, type: s.type, x1: num(s.x1), y1: num(s.y1), x2: num(s.x2), y2: num(s.y2) };
@@ -630,7 +634,7 @@ function draw() {
   // 単一選択かつ選択ツール時のみ変形ハンドル
   if (state.tool === 'select' && state.selection.size === 1) {
     const sel = selectedShape();
-    if (sel && !isLocked(sel)) drawHandles(sel);
+    if (sel && !isShapeLocked(sel)) drawHandles(sel);
   }
   if (draft) drawDraft();
   if (polyPts) drawPolyDraft();
@@ -766,6 +770,10 @@ function drawShape(s, selected) {
   }
   if (hasRot) ctx.restore();
   ctx.setLineDash([]); // 図形ごとに破線状態を後始末(ハンドル/後続描画への漏れ防止)
+  if (s.locked) { // ロック図形の鍵バッジ
+    const b = bbox(s);
+    if (b) { ctx.save(); ctx.font = '12px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('🔒', W2Sx(b.x) + 1, W2Sy(b.y) + 1); ctx.restore(); }
+  }
   if (selected) drawSelectionDecor(s);
 }
 
@@ -1287,7 +1295,7 @@ function onToolDown(p) {
     // 単一選択中はまず変形ハンドルを判定
     if (state.selection.size === 1) {
       const sel = selectedShape();
-      if (sel && !isLocked(sel) && startHandleDrag(sel, p)) return;
+      if (sel && !isShapeLocked(sel) && startHandleDrag(sel, p)) return;
     }
     const hit = hitTest(S2Wx(p.x), S2Wy(p.y));
     if (hit) {
@@ -1427,7 +1435,7 @@ function onToolMove(p) {
     }
     for (const [id, o] of dragMove.orig) {
       const s = state.shapes.find(x => x.id === id);
-      if (!s) continue; // 移動中に図形が消えた場合の保護
+      if (!s || s.locked) continue; // 消えた/ロック図形は動かさない
       const ns = JSON.parse(JSON.stringify(o));
       translateShape(ns, dx, dy);
       Object.assign(s, ns);
@@ -1860,7 +1868,7 @@ function duplicateSelection() {
   pushHistory(); draw();
 }
 function nudgeSelection(dx, dy) {
-  const list = selectedShapesList();
+  const list = selectedShapesList().filter(s => !s.locked);
   if (!list.length) return;
   for (const s of list) translateShape(s, dx, dy);
   pushHistory(); draw();
@@ -1953,10 +1961,20 @@ function reorderSelection(mode) {
   }
   pushHistory(); draw();
 }
+function toggleLockSelection() {
+  const list = selectedShapesList();
+  if (!list.length) return;
+  const lock = list.some(s => !s.locked); // 1つでも未ロックがあれば全ロック、なければ全解除
+  for (const s of list) { if (lock) s.locked = true; else delete s.locked; }
+  pushHistory(); draw();
+}
 function deleteSelection() {
   if (!state.selection.size) return;
-  state.shapes = state.shapes.filter(s => !state.selection.has(s.id));
-  state.selection.clear(); pushHistory(); draw();
+  const before = state.shapes.length;
+  state.shapes = state.shapes.filter(s => !(state.selection.has(s.id) && !s.locked)); // ロック図形は残す
+  state.selection.clear();
+  if (state.shapes.length !== before) pushHistory();
+  draw();
 }
 // 矩形配列複製
 const arrayDlg = document.getElementById('arrayDlg');
@@ -1988,7 +2006,7 @@ arrayDlg.addEventListener('click', e => { if (e.target === arrayDlg) arrayDlg.st
 
 const selActions = document.getElementById('selActions');
 selActions.querySelectorAll('button[data-act]').forEach(btn => {
-  btn.onclick = () => { const a = btn.dataset.act; if (a === 'dup') duplicateSelection(); else if (a === 'del') deleteSelection(); else if (a === 'array') openArrayDlg(); else if (a === 'group') groupSelection(); else if (a === 'ungroup') ungroupSelection(); };
+  btn.onclick = () => { const a = btn.dataset.act; if (a === 'dup') duplicateSelection(); else if (a === 'del') deleteSelection(); else if (a === 'array') openArrayDlg(); else if (a === 'group') groupSelection(); else if (a === 'ungroup') ungroupSelection(); else if (a === 'lock') toggleLockSelection(); };
 });
 function updateSelActions() {
   selActions.style.display = (state.tool === 'select' && state.selection.size >= 1) ? 'block' : 'none';
@@ -2034,9 +2052,7 @@ window.addEventListener('keydown', e => {
     nudgeSelection(dx, dy);
   }
   if ((e.key === 'Delete' || e.key === 'Backspace') && state.selection.size) {
-    e.preventDefault();
-    state.shapes = state.shapes.filter(s => !state.selection.has(s.id));
-    state.selection.clear(); pushHistory(); draw();
+    e.preventDefault(); deleteSelection();
   }
   if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
   // ツール切替(単独キー)
@@ -2400,6 +2416,7 @@ window.SimpleCAD = {
   alignAPI: { align: alignSelection, distribute: distributeSelection },
   orderAPI: { reorder: reorderSelection },
   groupAPI: { group: groupSelection, ungroup: ungroupSelection },
+  lockAPI: { toggle: toggleLockSelection },
   layerAPI: { add: addLayer, del: deleteLayer, moveSel: moveSelectionToActive, render: renderLayers, toggle: toggleLayers, ensure: ensureLayers },
   transformAPI: { handleGeom, scaleShapeAbout, shapeExtent, shapeCenter },
   loadJSON: (o) => { state.shapes = sanitizeShapes(o.shapes); const v = safeView(o.view); if (v) state.view = v; const ls = sanitizeLayers(o.layers); if (ls) state.layers = ls; if (o.activeLayer) state.activeLayer = String(o.activeLayer); ensureLayers(); resetHistory(); draw(); },
