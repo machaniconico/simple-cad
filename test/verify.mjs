@@ -1057,6 +1057,19 @@ check('作図ツールでcrosshairカーソル', await page.evaluate(() => docum
 await page.evaluate(() => window.SimpleCAD.setTool('select'));
 check('選択ツールでdefaultカーソル', await page.evaluate(() => document.getElementById('cv').style.cursor) === 'default');
 
+// --- AZ: 塗りスウォッチ ---
+const fillSwN = await page.evaluate(() => document.querySelectorAll('#fillSwatches button').length);
+check('塗りスウォッチが生成される(なし+7色)', fillSwN === 8, 'n=' + fillSwN);
+await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  window.SimpleCAD.addShape({ id: 'fl', type: 'rect', x: 0, y: 0, w: 10, h: 10, stroke: '#fff', strokeWidth: 1, fill: null });
+  window.SimpleCAD.select('fl');
+  document.querySelectorAll('#fillSwatches button')[1].click(); // 最初の色 #1e3a5f
+});
+check('塗りスウォッチで選択図形に塗りが入る', await page.evaluate(() => window.SimpleCAD.state.shapes[0].fill) === '#1e3a5f');
+await page.evaluate(() => { window.SimpleCAD.select('fl'); document.querySelectorAll('#fillSwatches button')[0].click(); }); // なし
+check('「なし」で塗りがnullになる', await page.evaluate(() => window.SimpleCAD.state.shapes[0].fill) === null);
+
 // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));
 
