@@ -1,1 +1,17 @@
-{"name":"simple-cad","version":"1.0.0","private":true,"devDependencies":{"playwright":"^1.61.0"}}
+{
+  "name": "simple-cad",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "ci": "npm test && npm run check",
+    "check": "node test/checkrepo.mjs --self-test && node test/checkrepo.mjs",
+    "test": "npm run test:functional && npm run test:pwa && npm run test:pdf && npm run test:sw",
+    "test:functional": "node test/verify.mjs",
+    "test:pwa": "node test/pwacheck.mjs",
+    "test:pdf": "node test/pdfcheck.mjs",
+    "test:sw": "node test/swunit.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
+}
