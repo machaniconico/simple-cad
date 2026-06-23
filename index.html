@@ -286,7 +286,7 @@
       <button id="propToggle" title="折りたたみ">▾</button>
       <h3>プロパティ</h3>
       <div class="body">
-        <label>線色 <input type="color" id="pStroke" value="#000000"></label>
+        <label>線色 <input type="color" id="pStroke" value="#ffffff"></label>
         <div id="swatches" role="group" aria-label="線色プリセット"></div>
         <label>塗り <span><input type="checkbox" id="pFillOn"> <input type="color" id="pFill" value="#1e3a5f"></span></label>
         <div id="fillSwatches" role="group" aria-label="塗りプリセット"></div>
@@ -298,7 +298,7 @@
         <label class="chk"><input type="checkbox" id="cGrid" checked> グリッド</label>
         <label class="chk"><input type="checkbox" id="cSnap" checked> グリッド吸着</label>
         <label class="chk"><input type="checkbox" id="cOsnap" checked> 端点スナップ</label>
-        <label class="chk"><input type="checkbox" id="cLight" checked> 用紙(白)モード</label>
+        <label class="chk"><input type="checkbox" id="cLight"> 用紙(白)モード</label>
         <label>小数桁 <select id="gPrec">
           <option value="0">0</option>
           <option value="1" selected>1</option>
@@ -656,10 +656,10 @@ function closeDialog(dialog) {
 }
 
 // ---- 状態 ----
-function defaultStyle() { return { stroke: '#000000', strokeWidth: 2, fill: null, fontSize: 16, sides: 6, dash: 'solid', dashOffset: 0, lineCap: 'round', lineJoin: 'round', miterLimit: 4 }; }
+function defaultStyle() { return { stroke: '#ffffff', strokeWidth: 2, fill: null, fontSize: 16, sides: 6, dash: 'solid', dashOffset: 0, lineCap: 'round', lineJoin: 'round', miterLimit: 4 }; }
 function defaultView() { return { scale: 2, offsetX: 0, offsetY: 0 }; }
 function defaultGrid() { return { show: true, snap: true, osnap: true, step: 10 }; }
-function defaultUi() { return { light: true, precision: 1 }; }
+function defaultUi() { return { light: false, precision: 1 }; }
 const state = {
   shapes: [],                          // 図形配列
   view: defaultView(),                 // 1mm = scale px
