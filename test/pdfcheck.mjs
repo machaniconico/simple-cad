@@ -1,7 +1,8 @@
 // 生成PDFをディスクに書き出し、xrefオフセットの妥当性まで検証する
 import { chromium } from 'playwright';
 import { pathToFileURL } from 'url';
-import { writeFileSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -23,7 +24,8 @@ const arr = await p.evaluate(async () => {
 await b.close();
 
 const buf = Buffer.from(arr);
-writeFileSync('/tmp/drawing.pdf', buf);
+const outDir = mkdtempSync(join(tmpdir(), 'simplecad-pdf-'));
+writeFileSync(join(outDir, 'drawing.pdf'), buf);
 const s = buf.toString('latin1');
 
 let ok = true;
