@@ -5,6 +5,7 @@
   "scripts": {
     "ci": "npm test && npm run check",
     "check": "node test/checkrepo.mjs --self-test && node test/checkrepo.mjs",
+    "pretest": "playwright install chromium",
     "test": "npm run test:functional && npm run test:pwa && npm run test:pdf && npm run test:sw",
     "test:functional": "node test/verify.mjs",
     "test:pwa": "node test/pwacheck.mjs",
