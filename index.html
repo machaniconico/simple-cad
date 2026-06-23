@@ -2422,7 +2422,7 @@ const S2Wy = sy => { const v = normalizeView(); return (sy - v.offsetY) / v.scal
 // ---- 高DPI対応キャンバスサイズ ----
 const CANVAS_CSS_SIZE_MAX = 32767;
 const CANVAS_BACKING_SIZE_MAX = 8192;
-const CANVAS_DPR_MAX = 4;
+const CANVAS_DPR_MAX = 2;
 let dpr = 1, viewW = 0, viewH = 0;
 function safeCanvasCssSize(v, fallback) {
   return clampNumber(v, 1, CANVAS_CSS_SIZE_MAX, fallback || 1);
@@ -3509,6 +3509,17 @@ function restoreProjectData(o) {
 // =========================================================================
 // 描画
 // =========================================================================
+// pointermove等の高頻度な再描画を1フレーム1回に集約する(ドラッグ時のジャンク/フリーズ対策)。
+// draw()自体は同期描画のまま残す(初期化・テスト・書出が同期描画に依存するため)。
+let drawScheduled = false;
+function scheduleDraw() {
+  if (drawScheduled) return;
+  drawScheduled = true;
+  const raf = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+    ? window.requestAnimationFrame.bind(window)
+    : (cb => setTimeout(cb, 16));
+  raf(() => { drawScheduled = false; draw(); });
+}
 function draw() {
   normalizeRuntimeCollections();
   normalizeStyle();
@@ -4907,7 +4918,7 @@ safeAddEventListener(cv, 'wheel', e => {
   const deltaY = safeEventNumber(e, 'deltaY', 0);
   const factor = deltaY === 0 ? 1 : deltaY < 0 ? 1.12 : 1 / 1.12;
   if (factor !== 1 && zoomAt(p.x, p.y, factor)) syncHistoryBaseline(true);
-  draw();
+  scheduleDraw();
 }, { passive: false });
 
 function zoomAt(sx, sy, factor) {
@@ -5095,14 +5106,14 @@ function doHandleDrag(p) {
     }
   }
   handleDrag.changed = true;
-  draw();
+  scheduleDraw();
 }
 
 function onToolMove(p) {
   const t = toolValue();
 
   if (handleDrag) { doHandleDrag(p); return; }
-  if (marquee) { marquee.x1 = S2Wx(p.x); marquee.y1 = S2Wy(p.y); draw(); return; }
+  if (marquee) { marquee.x1 = S2Wx(p.x); marquee.y1 = S2Wy(p.y); scheduleDraw(); return; }
   if (dragMove) {
     const wx = S2Wx(p.x), wy = S2Wy(p.y);
     let dx = wx - dragMove.startWorld.x, dy = wy - dragMove.startWorld.y;
@@ -5135,14 +5146,14 @@ function onToolMove(p) {
       anyMoved = true;
     }
     dragMove.moved = dragMove.moved || anyMoved;
-    draw(); return;
+    scheduleDraw(); return;
   }
 
-  if (arcDraft) { const w = resolvePoint(p.x, p.y); updateArcDraft(w); draw(); return; }
-  if (angleDraft) { const w = resolvePoint(p.x, p.y); updateAngleDraft(w); draw(); return; }
+  if (arcDraft) { const w = resolvePoint(p.x, p.y); updateArcDraft(w); scheduleDraw(); return; }
+  if (angleDraft) { const w = resolvePoint(p.x, p.y); updateAngleDraft(w); scheduleDraw(); return; }
   if (!draft) {
     // 選択ツールでなければスナップマーカーだけ更新
-    if (t !== 'select') { resolvePoint(p.x, p.y); draw(); }
+    if (t !== 'select') { resolvePoint(p.x, p.y); scheduleDraw(); }
     return;
   }
   const w = resolvePoint(p.x, p.y);
@@ -5171,7 +5182,7 @@ function onToolMove(p) {
     draft.r = Math.hypot(w.x - draft.cx, w.y - draft.cy);
     draft.aim = Math.atan2(w.y - draft.cy, w.x - draft.cx); // ドラッグ方向に頂点を向ける
   }
-  draw();
+  scheduleDraw();
 }
 
 function onToolUp(p) {
