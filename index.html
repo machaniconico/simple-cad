@@ -248,6 +248,7 @@
           <button data-exp="png" role="menuitem">PNG (画像)</button>
           <button data-exp="pdf" role="menuitem">PDF (実寸)</button>
           <button data-exp="dxf" role="menuitem">DXF (CAD連携)</button>
+          <button data-exp="print" role="menuitem">🖨 印刷 (実寸)</button>
         </div>
       </span>
     </div>
@@ -433,6 +434,7 @@
         <ul>
           <li>レイヤー / 整列・分布 / 重ね順 / 数値直接入力 に対応</li>
           <li>保存・読込(JSON)、DXF/SVG取り込み(📥取込)、画像トレース、SVG / PNG / PDF(実寸) 書き出し</li>
+          <li>実寸印刷(🖨 書出メニュー / Ctrl+P。印刷時は倍率100%を選択)</li>
           <li>ホーム画面に追加でオフライン利用可（PWA）</li>
         </ul>
       </div>
@@ -6391,7 +6393,7 @@ safeAddEventListener(btnExport, 'keydown', e => {
     safeSetHandler(b, 'onclick', () => {
       setExportMenuOpen(false);
       const k = safeGetDataset(b, 'exp', '');
-      if (k === 'svg') exportSVG(); else if (k === 'png') exportPNG(); else if (k === 'pdf') exportPDF(); else if (k === 'dxf') exportDXF();
+      if (k === 'svg') exportSVG(); else if (k === 'png') exportPNG(); else if (k === 'pdf') exportPDF(); else if (k === 'dxf') exportDXF(); else if (k === 'print') printDrawing();
     });
   }
 }
@@ -7025,6 +7027,7 @@ safeAddEventListener(window, 'keydown', e => {
   if (mod && keyLower === 'd') { preventKeyDefault(e); duplicateSelection(); }
   if (mod && keyLower === 'a') { preventKeyDefault(e); selectAll(); }
   if (mod && keyLower === 'g') { preventKeyDefault(e); shift ? ungroupSelection() : groupSelection(); }
+  if (mod && keyLower === 'p') { preventKeyDefault(e); printDrawing(); return; }
   // 矢印キーで選択図形を移動(Shiftで10倍)
   if (selectionSize() && safeListIncludes(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'], key)) {
     preventKeyDefault(e);
@@ -7227,6 +7230,63 @@ function exportSVG() {
   const svg = buildSVGString();
   if (!svg) { toast('表示中の図形がありません'); return; }
   return downloadTextFile(svg, 'image/svg+xml', 'drawing.svg');
+}
+// ---- 印刷（実寸ベクター。buildSVGStringはmm寸法のSVGを返すため1:1で印刷できる）----
+// 印刷用HTML文書を生成（純関数・テスト容易化のため分離）。svgは検証済みデータから組み立て済み。
+function buildPrintDocument(svg) {
+  const body = safeString(svg, '');
+  return '<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">'
+    + '<title>SimpleCAD 印刷</title>'
+    + '<style>'
+    + 'html,body{margin:0;padding:0;background:#fff;}'
+    + 'svg{display:block;}'
+    + '@page{size:auto;margin:8mm;}'
+    + '@media print{body{margin:0;}}'
+    + '</style></head><body>' + body + '</body></html>';
+}
+// 非表示iframeへ実寸SVGを書き込み印刷ダイアログを開く（ポップアップブロッカー回避のためwindow.openは使わない）
+function printSVGDocument(svg) {
+  let frame = null;
+  try {
+    frame = safeCreateElement('iframe');
+    if (!frame) throw new Error('PRINT_FRAME_CREATE_FAILED');
+    safeSetAttr(frame, 'aria-hidden', 'true');
+    safeSetAttr(frame, 'style', 'position:fixed; right:0; bottom:0; width:1px; height:1px; border:0; visibility:hidden;');
+    if (!safeAppend(safeProp(document, 'body', null), frame)) throw new Error('PRINT_FRAME_APPEND_FAILED');
+    const win = safeProp(frame, 'contentWindow', null);
+    const doc = safeProp(frame, 'contentDocument', null) || safeProp(win, 'document', null);
+    if (!doc || typeof doc.open !== 'function' || typeof doc.write !== 'function' || typeof doc.close !== 'function') {
+      throw new Error('PRINT_FRAME_DOC_UNAVAILABLE');
+    }
+    doc.open();
+    doc.write(buildPrintDocument(svg));
+    doc.close();
+    let done = false;
+    const cleanup = () => { if (frame) { safeRemoveNode(frame); frame = null; } };
+    const fire = () => {
+      if (done) return;
+      done = true;
+      try { if (win && typeof win.focus === 'function') win.focus(); } catch (e) {}
+      try { if (win && typeof win.print === 'function') win.print(); } catch (e) {}
+      // 印刷ダイアログが閉じた後に後始末（onafterprint未対応環境向けにタイマーでもフォールバック）
+      safeSetTimeout(cleanup, 1500);
+    };
+    try { if (win) win.onafterprint = cleanup; } catch (e) {}
+    // 画像(dataURL)やフォントの描画完了を待ってから印刷。onload優先＋タイマーフォールバックの二重起動防止。
+    try { if (win) win.onload = fire; } catch (e) {}
+    if (safeSetTimeout(fire, 300) === null) fire();
+    return true;
+  } catch (e) {
+    safeRemoveNode(frame);
+    toast('印刷の準備に失敗しました');
+    return false;
+  }
+}
+function printDrawing() {
+  const svg = buildSVGString();
+  if (!svg) { toast('表示中の図形がありません'); return false; }
+  toast('印刷は倍率100%(実寸)を選んでください');
+  return printSVGDocument(svg);
 }
 // SVG文字列を生成（純関数・テスト容易化のため分離）
 function buildSVGString(options = {}) {
@@ -12268,6 +12328,8 @@ function reloadFromStore() {
 window.SimpleCAD = {
   state, draw, fitView, undo, redo,
   buildSVGString,
+  buildPrintDocument,
+  printDrawing,
   buildDXF,
   parseDXF,
   parseSVG,
