@@ -443,6 +443,12 @@
           <li>画面フィット <b>F</b> / ヘルプ <b>?</b></li>
           <li>正多角形は左パレットの ⬡（辺数は右パネル）</li>
         </ul>
+        <h3>見取り図・展開図</h3>
+        <ul>
+          <li><b>等角(アイソメ)グリッド</b>: 右パネルで ON にすると30°の等角格子に吸着し見取り図が描けます。線・連線で <b>Shift</b> を押すと30/90/150°の等角軸にロック</li>
+          <li><b>作図中の数値表示</b>: 線・連線を引くと長さと角度がカーソル付近に表示され、円は直径(⌀)も表示されます</li>
+          <li><b>展開図</b>: 上部の <b>📦 展開図</b> から直方体・円柱・円錐を寸法指定で生成（折り線=破線、寸法付き）</li>
+        </ul>
         <h3>操作</h3>
         <ul>
           <li>スマホ: 2本指でピンチ=ズーム/ドラッグ=パン、1本指で作図</li>
@@ -5200,7 +5206,7 @@ function doHandleDrag(p) {
     // pointerをローカル座標へ(中心まわり逆回転)
     const lp = rotatePt(wx, wy, handleDrag.center.x, handleDrag.center.y, -handleDrag.angle);
     let lx = lp.x, ly = lp.y;
-    if (gridSnapEnabled()) { const g = gridStepValue(); lx = Math.round(lx / g) * g; ly = Math.round(ly / g) * g; }
+    if (gridSnapEnabled() && !gridIsoEnabled()) { const g = gridStepValue(); lx = Math.round(lx / g) * g; ly = Math.round(ly / g) * g; } // 等角モードでは矩形格子へ吸着させない(端点スナップは有効)
     const a = handleDrag.anchorLocal, o = handleDrag.origCornerLocal;
     const dxo = o.x - a.x, dyo = o.y - a.y;
     let sx = Math.abs(dxo) > 1e-6 ? (lx - a.x) / dxo : 1;
@@ -5246,8 +5252,13 @@ function onToolMove(p) {
         if (b) {
           const g = gridStepValue();
           const ax = b.x + dx, ay = b.y + dy;
-          dx += Math.round(ax / g) * g - ax;
-          dy += Math.round(ay / g) * g - ay;
+          if (gridIsoEnabled()) { // 等角モードは等角格子点へ寄せる(見取り図の整合を保つ)
+            const sp = snapToIso({ x: ax, y: ay });
+            dx += sp.x - ax; dy += sp.y - ay;
+          } else {
+            dx += Math.round(ax / g) * g - ax;
+            dy += Math.round(ay / g) * g - ay;
+          }
         }
       }
     }
@@ -7156,6 +7167,7 @@ function runNet() {
   for (let i = 0; i < lines.length; i++) { acc(lines[i].x1, lines[i].y1); acc(lines[i].x2, lines[i].y2); }
   for (let i = 0; i < circles.length; i++) { acc(circles[i].cx - circles[i].r, circles[i].cy - circles[i].r); acc(circles[i].cx + circles[i].r, circles[i].cy + circles[i].r); }
   for (let i = 0; i < polys.length; i++) { const p = polys[i].points; for (let j = 0; j < p.length; j++) acc(p[j].x, p[j].y); }
+  for (let i = 0; i < dims.length; i++) { acc(dims[i].x1, dims[i].y1); acc(dims[i].x2, dims[i].y2); } // 寸法線も含めて中央寄せ
   if (!Number.isFinite(minX)) { closeNetDlg(); return; }
   const dx = S2Wx(viewW / 2) - (minX + maxX) / 2, dy = S2Wy(viewH / 2) - (minY + maxY) / 2;
 
@@ -7165,6 +7177,11 @@ function runNet() {
   for (let i = 0; i < polys.length; i++) { const pts = []; const p = polys[i].points; for (let j = 0; j < p.length; j++) pts.push({ x: p[j].x + dx, y: p[j].y + dy }); out.push({ id: uid(), type: 'polyline', points: pts, closed: !!polys[i].closed, stroke: color, strokeWidth: 1.5, fill: null, dash: 'solid', layer: layer }); }
   for (let i = 0; i < dims.length; i++) { const d = dims[i]; out.push({ id: uid(), type: 'dim', x1: d.x1 + dx, y1: d.y1 + dy, x2: d.x2 + dx, y2: d.y2 + dy, stroke: '#fbbf24', strokeWidth: 1.5, fill: null, dash: 'solid', layer: layer }); }
 
+  // 図形上限に収まらない場合は中途半端な展開図を作らず中止
+  if (out.length > remainingShapeSlots()) {
+    toast(`図形数の上限(${MAX_SHAPES})に達するため展開図を作成できません`);
+    closeNetDlg(); return;
+  }
   const created = [];
   let added = 0;
   for (let i = 0; i < out.length; i++) { if (addShapeWithLimit(out[i], added === 0)) { created.push(out[i].id); added++; } else break; }
@@ -7173,6 +7190,7 @@ function runNet() {
     sel.clear();
     for (let i = 0; i < created.length; i++) sel.add(created[i]);
     pushHistory();
+    fitView(); // 生成した展開図が画面外に出ないよう全体をフィット(取込処理と同じ慣例)
   }
   closeNetDlg(); draw();
 }
