@@ -3537,6 +3537,55 @@ check('PDFに%%EOFがある', pdfInfo && pdfInfo.hasEOF);
 check('PDFにxrefがある', pdfInfo && pdfInfo.hasXref);
 check('PDFに画像XObjectが埋め込まれる', pdfInfo && pdfInfo.hasImage);
 check('PDF MIMEがapplication/pdf', pdfInfo && pdfInfo.type === 'application/pdf');
+const pdfChunkIteratorRecoveryErrorsBefore = consoleErrors.length;
+const pdfChunkIteratorRecovery = await page.evaluate(async () => {
+  const originalIterator = Object.getOwnPropertyDescriptor(Array.prototype, Symbol.iterator);
+  const originalValue = originalIterator && originalIterator.value;
+  const isPdfChunkArray = value => {
+    try {
+      const len = Number(value && value.length) || 0;
+      if (len < 2) return false;
+      for (let i = 0; i < len; i++) {
+        if (!(value[i] instanceof Uint8Array)) return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+  try {
+    Object.defineProperty(Array.prototype, Symbol.iterator, {
+      configurable: true,
+      value: function (...args) {
+        if (isPdfChunkArray(this)) throw new Error('broken pdf chunk iterator');
+        return originalValue.apply(this, args);
+      },
+    });
+    const blob = await window.SimpleCAD.buildPDFBlob();
+    return {
+      ok: !!blob,
+      size: blob ? blob.size : 0,
+      type: blob ? blob.type : '',
+      patched: Array.prototype[Symbol.iterator] !== originalValue,
+    };
+  } catch (e) {
+    return { ok: false, message: String(e && e.message || e) };
+  } finally {
+    try {
+      if (originalIterator) Object.defineProperty(Array.prototype, Symbol.iterator, originalIterator);
+      else delete Array.prototype[Symbol.iterator];
+    } catch (e) {}
+  }
+});
+await page.waitForTimeout(20);
+const pdfChunkIteratorRecoveryErrors = consoleErrors.slice(pdfChunkIteratorRecoveryErrorsBefore);
+check('PDFバイナリ結合は配列iterator破損下でもBlobを生成する',
+  pdfChunkIteratorRecovery.ok === true &&
+  pdfChunkIteratorRecovery.patched === true &&
+  pdfChunkIteratorRecovery.size > 1000 &&
+  pdfChunkIteratorRecovery.type === 'application/pdf' &&
+  pdfChunkIteratorRecoveryErrors.length === 0,
+  JSON.stringify({ pdfChunkIteratorRecovery, pdfChunkIteratorRecoveryErrors }));
 // ページサイズが実寸(110mm x 60mm 相当, padding込み)。100+10pad*2=110mm→311.8pt前後
 const mediaBox = await page.evaluate(async () => {
   const blob = await window.SimpleCAD.buildPDFBlob();
@@ -5153,7 +5202,7 @@ check('実行時に循環/未知プロパティが混入しても保存前に除
   runtimeSerializableSanitize.storedHasExtras === false &&
   JSON.stringify(runtimeSerializableSanitize.shapeKeys) === JSON.stringify(['dash', 'dashOffset', 'fill', 'h', 'id', 'layer', 'lineCap', 'lineJoin', 'miterLimit', 'rot', 'stroke', 'strokeWidth', 'type', 'w', 'x', 'y'].sort()) &&
   JSON.stringify(runtimeSerializableSanitize.layerKeys) === JSON.stringify(['id', 'locked', 'name', 'visible']) &&
-  JSON.stringify(runtimeSerializableSanitize.gridKeys) === JSON.stringify(['osnap', 'show', 'snap', 'step']) &&
+  JSON.stringify(runtimeSerializableSanitize.gridKeys) === JSON.stringify(['iso', 'osnap', 'show', 'snap', 'step']) &&
   JSON.stringify(runtimeSerializableSanitize.uiKeys) === JSON.stringify(['light', 'precision']),
   JSON.stringify(runtimeSerializableSanitize));
 const runtimeObjectKeysRecoveryErrorsBefore = consoleErrors.length;
@@ -5693,7 +5742,7 @@ check('例外を投げるgetter付き設定/viewは既定値へ正規化され�
   throwingPrefsSanitize.drawOk === true &&
   throwingPrefsSanitize.dumpOk === true &&
   throwingPrefsSanitize.saved === true &&
-  JSON.stringify(throwingPrefsSanitize.grid) === JSON.stringify({ show: true, snap: true, osnap: true, step: 10 }) &&
+  JSON.stringify(throwingPrefsSanitize.grid) === JSON.stringify({ show: true, snap: true, osnap: true, step: 10, iso: false }) &&
   JSON.stringify(throwingPrefsSanitize.ui) === JSON.stringify({ light: false, precision: 1 }) &&
   JSON.stringify(throwingPrefsSanitize.style) === JSON.stringify({ stroke: '#000000', fill: null, strokeWidth: 2, fontSize: 16, sides: 6, dash: 'solid', dashOffset: 0, lineCap: 'round', lineJoin: 'round', miterLimit: 4 }) &&
   throwingPrefsSanitize.view.scale === 2 &&
@@ -5823,7 +5872,7 @@ check('state直下の設定アクセサが代入を無視してもプレーン�
   stickyTopLevelPrefsAccessor.ignoredSets.grid > 0 &&
   stickyTopLevelPrefsAccessor.ignoredSets.ui > 0 &&
   stickyTopLevelPrefsAccessor.ignoredSets.style > 0 &&
-  JSON.stringify(stickyTopLevelPrefsAccessor.grid) === JSON.stringify({ show: false, snap: false, osnap: true, step: 25 }) &&
+  JSON.stringify(stickyTopLevelPrefsAccessor.grid) === JSON.stringify({ show: false, snap: false, osnap: true, step: 25, iso: false }) &&
   JSON.stringify(stickyTopLevelPrefsAccessor.ui) === JSON.stringify({ light: true, precision: 3 }) &&
   stickyTopLevelPrefsAccessor.style &&
   stickyTopLevelPrefsAccessor.style.stroke === '#123456' &&
@@ -5899,7 +5948,7 @@ check('壊れた設定/viewアクセサが残っていてもJSON読込と寸法�
   prefsAccessorLoadDimension.drawOk === true &&
   prefsAccessorLoadDimension.dumpOk === true &&
   prefsAccessorLoadDimension.svgOk === true &&
-  JSON.stringify(prefsAccessorLoadDimension.grid) === JSON.stringify({ show: true, snap: true, osnap: true, step: 10 }) &&
+  JSON.stringify(prefsAccessorLoadDimension.grid) === JSON.stringify({ show: true, snap: true, osnap: true, step: 10, iso: false }) &&
   JSON.stringify(prefsAccessorLoadDimension.ui) === JSON.stringify({ light: true, precision: 1 }) &&
   JSON.stringify(prefsAccessorLoadDimension.style) === JSON.stringify({ stroke: '#000000', fill: null, strokeWidth: 2, fontSize: 16, sides: 6, dash: 'solid', dashOffset: 0, lineCap: 'round', lineJoin: 'round', miterLimit: 4 }) &&
   prefsAccessorLoadDimension.view &&
@@ -19913,6 +19962,104 @@ check('DXF ACAD_TABLE取り込みは内部pair/寸法配列iterator破損下で�
   dxfTableIteratorRecovery.all.every(s => s.layer === 'TABLE_ITER' && s.allFinite) &&
   dxfTableIteratorRecoveryErrors.length === 0,
   JSON.stringify({ dxfTableIteratorRecovery, dxfTableIteratorRecoveryErrors }));
+const dxfShapeArrayIteratorRecoveryErrorsBefore = consoleErrors.length;
+const dxfShapeArrayIteratorRecovery = await page.evaluate(() => {
+  const originalIterator = Object.getOwnPropertyDescriptor(Array.prototype, Symbol.iterator);
+  const summarize = out => out.map(s => ({
+    type: s.type,
+    stroke: s.stroke,
+    layer: s._layerName,
+    x1: s.x1,
+    y1: s.y1,
+    x2: s.x2,
+    y2: s.y2,
+    x: s.x,
+    y: s.y,
+    text: s.text,
+    allFinite: Object.values(s).filter(v => typeof v === 'number').every(Number.isFinite),
+  }));
+  const isShapeArray = list => {
+    if (!Array.isArray(list) || !list.length || list.length > 32) return false;
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      if (!item || typeof item !== 'object' || typeof item.type !== 'string') return false;
+    }
+    return true;
+  };
+  const topEntity = ['0', 'ACAD_TABLE', '8', 'TABLE_SHAPE_TOP', '62', '1', '6', 'DASHED', '370', '25',
+    '100', 'AcDbEntity',
+    '100', 'AcDbBlockReference', '2', '*T4', '10', '10', '20', '20',
+    '100', 'AcDbTable',
+    '11', '1', '21', '0',
+    '91', '2', '92', '2',
+    '141', '6', '141', '8',
+    '142', '20', '142', '30',
+    '140', '3',
+    '171', '1', '1', 'A1',
+    '171', '1', '2', 'Long\\~', '1', 'Part',
+    '171', '1', '1', '%%c5',
+    '171', '1', '1', 'Note\\P2'];
+  const topDxf = ['0', 'SECTION', '2', 'ENTITIES', ...topEntity, '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const blockDxf = ['0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'TABLE_SHAPE_BLOCK', '10', '0', '20', '0',
+    '0', 'ACAD_TABLE', '8', '0',
+    '100', 'AcDbEntity',
+    '100', 'AcDbBlockReference', '2', '*T5', '10', '0', '20', '0',
+    '100', 'AcDbTable',
+    '11', '1', '21', '0',
+    '91', '1', '92', '1',
+    '141', '4', '142', '10',
+    '140', '2',
+    '171', '1', '1', 'B',
+    '0', 'ENDBLK',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'INSERT', '8', 'TABLE_SHAPE_INSERT', '2', 'TABLE_SHAPE_BLOCK', '62', '5', '10', '100', '20', '50', '50', '90',
+    '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  let patched = false;
+  let top = null, block = null;
+  try {
+    Object.defineProperty(Array.prototype, Symbol.iterator, {
+      configurable: true,
+      value() {
+        if (isShapeArray(this)) throw new Error('broken dxf shape array iterator');
+        return originalIterator.value.call(this);
+      },
+    });
+    patched = true;
+    top = window.SimpleCAD.parseDXF(topDxf);
+    block = window.SimpleCAD.parseDXF(blockDxf);
+  } catch (err) {
+    return { ok: false, patched, error: String(err && err.message || err) };
+  } finally {
+    Object.defineProperty(Array.prototype, Symbol.iterator, originalIterator);
+  }
+  return { ok: true, patched, top: summarize(top), block: summarize(block) };
+});
+const dxfShapeArrayIteratorRecoveryErrors = consoleErrors.slice(dxfShapeArrayIteratorRecoveryErrorsBefore);
+check('DXF複数図形返却は図形配列iterator破損下でも追加/INSERT展開できる',
+  dxfShapeArrayIteratorRecovery.ok === true &&
+  dxfShapeArrayIteratorRecovery.patched === true &&
+  dxfShapeArrayIteratorRecovery.top.length === 10 &&
+  dxfShapeArrayIteratorRecovery.top.filter(s => s.type === 'line').length === 6 &&
+  dxfShapeArrayIteratorRecovery.top.filter(s => s.type === 'text').length === 4 &&
+  dxfShapeArrayIteratorRecovery.top.every(s => s.layer === 'TABLE_SHAPE_TOP' && s.allFinite) &&
+  dxfShapeArrayIteratorRecovery.top[6].text === 'A1' &&
+  dxfShapeArrayIteratorRecovery.top[7].text === 'Long Part' &&
+  dxfShapeArrayIteratorRecovery.top[8].text === 'Ø5' &&
+  dxfShapeArrayIteratorRecovery.top[9].text === 'Note\n2' &&
+  dxfShapeArrayIteratorRecovery.block.length === 5 &&
+  dxfShapeArrayIteratorRecovery.block.filter(s => s.type === 'line').length === 4 &&
+  dxfShapeArrayIteratorRecovery.block.filter(s => s.type === 'text').length === 1 &&
+  dxfShapeArrayIteratorRecovery.block.every(s => s.layer === 'TABLE_SHAPE_INSERT' && s.allFinite) &&
+  dxfShapeArrayIteratorRecovery.block[0].stroke === '#0000ff' &&
+  dxfShapeArrayIteratorRecovery.block[0].x1 === 100 &&
+  dxfShapeArrayIteratorRecovery.block[0].y1 === -50 &&
+  dxfShapeArrayIteratorRecovery.block[0].x2 === 104 &&
+  dxfShapeArrayIteratorRecovery.block[0].y2 === -50 &&
+  dxfShapeArrayIteratorRecovery.block[4].text === 'B' &&
+  dxfShapeArrayIteratorRecoveryErrors.length === 0,
+  JSON.stringify({ dxfShapeArrayIteratorRecovery, dxfShapeArrayIteratorRecoveryErrors }));
 const dxfPointRayXlineImport = await page.evaluate(() => {
   const summarize = out => out.map(s => ({
     type: s.type,
@@ -20396,6 +20543,107 @@ check('DXF PDF/DWF/DGN UNDERLAYを参照フットプリントとラベルとし�
   Math.abs(dxfUnderlayImport.block[1].rot + Math.PI / 2) < 1e-9 &&
   dxfUnderlayImport.top.concat(dxfUnderlayImport.block).every(s => s.allFinite),
   JSON.stringify(dxfUnderlayImport));
+
+const dxfPointArrayIteratorRecoveryErrorsBefore = consoleErrors.length;
+const dxfPointArrayIteratorRecovery = await page.evaluate(() => {
+  const originalIterator = Object.getOwnPropertyDescriptor(Array.prototype, Symbol.iterator);
+  const isPointArray = arr => Array.isArray(arr) && arr.length > 0 && arr.every(p =>
+    p && typeof p === 'object' &&
+    Number.isFinite(p.x) &&
+    Number.isFinite(p.y) &&
+    !Object.prototype.hasOwnProperty.call(p, 'type'));
+  const summarize = out => out.map(s => {
+    const points = s.points || [];
+    return {
+      type: s.type,
+      text: s.text,
+      layer: s._layerName,
+      count: points.length,
+      closed: s.closed === true,
+      first: points[0] || null,
+      last: points[points.length - 1] || null,
+      allFinite: points.length
+        ? points.every(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+        : [s.x, s.y, s.fontSize, s.rot || 0].every(v => v == null || Number.isFinite(v)),
+    };
+  });
+  try {
+    Object.defineProperty(Array.prototype, Symbol.iterator, {
+      configurable: true,
+      writable: true,
+      value: function() {
+        if (isPointArray(this)) throw new Error('broken dxf point array iterator');
+        return originalIterator.value.call(this);
+      },
+    });
+    const defs = ['0', 'SECTION', '2', 'OBJECTS',
+      '0', 'IMAGEDEF', '5', 'IMG1', '1', 'C:/refs/floor.png',
+      '0', 'PDFDEFINITION', '5', 'PDFA', '1', 'C:/refs/plan.pdf', '2', 'Sheet 1',
+      '0', 'ENDSEC'];
+    const dxf = defs.concat(['0', 'SECTION', '2', 'ENTITIES',
+      '0', 'WIPEOUT', '8', 'ITER_WIPE',
+      '10', '0', '20', '0', '11', '1', '21', '0', '12', '0', '22', '1', '13', '10', '23', '5', '71', '1', '91', '2',
+      '14', '-0.5', '24', '-0.5', '14', '9.5', '24', '4.5',
+      '0', 'IMAGE', '8', 'ITER_IMAGE', '340', 'IMG1',
+      '10', '20', '20', '0', '11', '1', '21', '0', '12', '0', '22', '1', '13', '8', '23', '4', '71', '1', '91', '2',
+      '14', '-0.5', '24', '-0.5', '14', '7.5', '24', '3.5',
+      '0', 'PDFUNDERLAY', '8', 'ITER_UNDERLAY', '340', 'PDFA',
+      '10', '40', '20', '0', '41', '2', '42', '1', '280', '2',
+      '11', '0', '21', '0', '11', '5', '21', '3',
+      '0', 'MLINE', '8', 'ITER_MLINE', '71', '0',
+      '11', '0', '21', '0', '11', '4', '21', '0', '11', '4', '21', '3',
+      '0', 'LEADER', '8', 'ITER_LEADER', '71', '0', '72', '0',
+      '10', '0', '20', '0', '10', '4', '20', '0', '10', '4', '20', '3',
+      '0', 'SECTION', '8', 'ITER_SECTION',
+      '11', '0', '21', '0', '11', '6', '21', '0',
+      '0', 'ENDSEC', '0', 'EOF']).join('\n');
+    return {
+      ok: true,
+      patched: Array.prototype[Symbol.iterator] !== originalIterator.value,
+      shapes: summarize(window.SimpleCAD.parseDXF(dxf)),
+    };
+  } catch (e) {
+    return { ok: false, message: String(e && e.message || e), stack: String(e && e.stack || '') };
+  } finally {
+    Object.defineProperty(Array.prototype, Symbol.iterator, originalIterator);
+  }
+});
+const dxfPointArrayIteratorRecoveryErrors = consoleErrors.slice(dxfPointArrayIteratorRecoveryErrorsBefore);
+const dxfPointArrayShapes = dxfPointArrayIteratorRecovery.shapes || [];
+const dxfPointArrayLayer = layer => dxfPointArrayShapes.filter(s => s.layer === layer);
+const dxfPointArrayWipe = dxfPointArrayLayer('ITER_WIPE');
+const dxfPointArrayImage = dxfPointArrayLayer('ITER_IMAGE');
+const dxfPointArrayUnderlay = dxfPointArrayLayer('ITER_UNDERLAY');
+const dxfPointArrayMline = dxfPointArrayLayer('ITER_MLINE');
+const dxfPointArrayLeader = dxfPointArrayLayer('ITER_LEADER');
+const dxfPointArraySection = dxfPointArrayLayer('ITER_SECTION');
+check('DXF点列サンプリングは点配列iterator破損下でも参照/境界図形を取り込める',
+  dxfPointArrayIteratorRecovery.ok === true &&
+  dxfPointArrayIteratorRecovery.patched === true &&
+  dxfPointArrayWipe.length === 1 &&
+  dxfPointArrayWipe[0].type === 'polyline' &&
+  dxfPointArrayWipe[0].count === 4 &&
+  dxfPointArrayWipe[0].closed === true &&
+  dxfPointArrayImage.length === 2 &&
+  dxfPointArrayImage[0].type === 'polyline' &&
+  dxfPointArrayImage[0].count === 4 &&
+  dxfPointArrayImage[1].text === 'floor.png' &&
+  dxfPointArrayUnderlay.length === 2 &&
+  dxfPointArrayUnderlay[0].type === 'polyline' &&
+  dxfPointArrayUnderlay[0].count === 4 &&
+  dxfPointArrayUnderlay[1].text === 'PDF plan.pdf (Sheet 1)' &&
+  dxfPointArrayMline.length === 1 &&
+  dxfPointArrayMline[0].type === 'polyline' &&
+  dxfPointArrayMline[0].count === 3 &&
+  dxfPointArrayLeader.length === 1 &&
+  dxfPointArrayLeader[0].type === 'polyline' &&
+  dxfPointArrayLeader[0].count === 3 &&
+  dxfPointArraySection.length === 2 &&
+  dxfPointArraySection[0].type === 'polyline' &&
+  dxfPointArraySection[0].count === 2 &&
+  dxfPointArrayShapes.every(s => s.allFinite) &&
+  dxfPointArrayIteratorRecoveryErrors.length === 0,
+  JSON.stringify({ dxfPointArrayIteratorRecovery, dxfPointArrayIteratorRecoveryErrors }));
 
 const dxfOle2FrameImport = await page.evaluate(() => {
   const summarize = out => out.map(s => {
@@ -21481,6 +21729,146 @@ check('SVG pattern paintは代表色へ変換し透明patternは取り込まな�
   svgPatternPaintImport.text.stroke === 'rgba(51,102,153,0.5)' &&
   svgPatternPaintImport.ellipse.fill === '#abcdef',
   JSON.stringify(svgPatternPaintImport));
+const svgPaintServerIteratorRecoveryErrorsBefore = consoleErrors.length;
+const svgPaintServerIteratorRecovery = await page.evaluate(() => {
+  const originalIterator = Object.getOwnPropertyDescriptor(Array.prototype, Symbol.iterator);
+  const arrayLen = arr => {
+    const len = Number(arr && arr.length);
+    return Number.isFinite(len) && len >= 0 && len <= 4096 ? len : -1;
+  };
+  const isSvgElementArray = arr => {
+    try {
+      const len = arrayLen(arr);
+      if (len <= 0) return false;
+      let elements = 0;
+      for (let i = 0; i < len; i++) {
+        const item = arr[i];
+        if (item && item.nodeType === 1) elements++;
+      }
+      return elements === len;
+    } catch (e) {
+      return false;
+    }
+  };
+  const isCssRuleArray = arr => {
+    try {
+      const len = arrayLen(arr);
+      if (len <= 0) return false;
+      let rules = 0;
+      for (let i = 0; i < len; i++) {
+        const item = arr[i];
+        if (item && item.selector && item.decls) rules++;
+      }
+      return rules === len;
+    } catch (e) {
+      return false;
+    }
+  };
+  const isGradientStopArray = arr => {
+    try {
+      const len = arrayLen(arr);
+      if (len <= 0) return false;
+      let stops = 0;
+      for (let i = 0; i < len; i++) {
+        const item = arr[i];
+        if (item && Number.isFinite(item.offset) && Array.isArray(item.rgb) && Number.isFinite(item.alpha)) stops++;
+      }
+      return stops === len;
+    } catch (e) {
+      return false;
+    }
+  };
+  const isPaintSampleArray = arr => {
+    try {
+      const len = arrayLen(arr);
+      if (len <= 0) return false;
+      let samples = 0;
+      for (let i = 0; i < len; i++) {
+        const item = arr[i];
+        if (item && item.color && Number.isFinite(item.weight)) samples++;
+      }
+      return samples === len;
+    } catch (e) {
+      return false;
+    }
+  };
+  const isPathSegmentArray = arr => {
+    try {
+      const len = arrayLen(arr);
+      if (len <= 0) return false;
+      let segments = 0;
+      for (let i = 0; i < len; i++) {
+        const item = arr[i];
+        if (item && Array.isArray(item.pts) && typeof item.closed === 'boolean') segments++;
+      }
+      return segments === len;
+    } catch (e) {
+      return false;
+    }
+  };
+  try {
+    Object.defineProperty(Array.prototype, Symbol.iterator, {
+      configurable: true,
+      writable: true,
+      value: function() {
+        if (isSvgElementArray(this) || isCssRuleArray(this) || isGradientStopArray(this) || isPaintSampleArray(this) || isPathSegmentArray(this)) {
+          throw new Error('broken svg paint/style iterator');
+        }
+        return originalIterator.value.call(this);
+      },
+    });
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg">' +
+      '<style>.iterRect{fill:url(#solidGrad);stroke:url(#solidPattern);stroke-width:2}.iterPath{stroke:#224466;fill:none}</style>' +
+      '<defs>' +
+      '<linearGradient id="solidGrad"><stop offset="0" stop-color="#123456"/><stop offset="1" stop-color="#123456"/></linearGradient>' +
+      '<pattern id="solidPattern" width="10" height="10"><rect width="10" height="10" fill="#00ff00"/></pattern>' +
+      '<g id="used"><line x1="0" y1="0" x2="5" y2="0" stroke="#224466"/></g>' +
+      '</defs>' +
+      '<rect class="iterRect" x="0" y="0" width="10" height="10"/>' +
+      '<path class="iterPath" d="M0 20 L10 20 M20 20 L30 20"/>' +
+      '<use href="#used" x="0" y="40"/>' +
+      '</svg>';
+    const out = window.SimpleCAD.parseSVG(svg);
+    const rect = out.find(s => s.type === 'rect') || null;
+    const polylines = out.filter(s => s.type === 'polyline');
+    const line = out.find(s => s.type === 'line') || null;
+    return {
+      ok: true,
+      patched: Array.prototype[Symbol.iterator] !== originalIterator.value,
+      count: out.length,
+      rect,
+      polylines,
+      line,
+      allFinite: out.every(s => {
+        const pts = s.points || [];
+        if (pts.length) return pts.every(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+        return ['x', 'y', 'w', 'h', 'x1', 'y1', 'x2', 'y2'].every(k => s[k] == null || Number.isFinite(s[k]));
+      }),
+    };
+  } catch (e) {
+    return { ok: false, message: String(e && e.message || e), stack: String(e && e.stack || '') };
+  } finally {
+    Object.defineProperty(Array.prototype, Symbol.iterator, originalIterator);
+  }
+});
+const svgPaintServerIteratorRecoveryErrors = consoleErrors.slice(svgPaintServerIteratorRecoveryErrorsBefore);
+check('SVG paint/style/use/path配列iterator破損下でもstyleと代表色を解決して取り込める',
+  svgPaintServerIteratorRecovery.ok === true &&
+  svgPaintServerIteratorRecovery.patched === true &&
+  svgPaintServerIteratorRecovery.count === 4 &&
+  svgPaintServerIteratorRecovery.rect &&
+  svgPaintServerIteratorRecovery.rect.fill === '#123456' &&
+  svgPaintServerIteratorRecovery.rect.stroke === '#00ff00' &&
+  Math.abs(svgPaintServerIteratorRecovery.rect.strokeWidth - 2) < 1e-9 &&
+  svgPaintServerIteratorRecovery.polylines.length === 2 &&
+  svgPaintServerIteratorRecovery.polylines.every(s => s.stroke === '#224466' && s.fill === null && s.points.length === 2) &&
+  svgPaintServerIteratorRecovery.line &&
+  svgPaintServerIteratorRecovery.line.stroke === '#224466' &&
+  Math.abs(svgPaintServerIteratorRecovery.line.y1 - 40) < 1e-9 &&
+  Math.abs(svgPaintServerIteratorRecovery.line.y2 - 40) < 1e-9 &&
+  svgPaintServerIteratorRecovery.allFinite === true &&
+  svgPaintServerIteratorRecoveryErrors.length === 0,
+  JSON.stringify({ svgPaintServerIteratorRecovery, svgPaintServerIteratorRecoveryErrors }));
 const svgUseParsed = await page.evaluate(() => {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg">' +
     '<defs><g id="part"><rect x="0" y="0" width="5" height="3"/><line x1="0" y1="0" x2="5" y2="0"/></g></defs>' +
@@ -22426,6 +22814,58 @@ check('印刷: printDrawingはiframeを生成し印刷後に後始末する(図�
   printResult.emptyRet === false &&
   printErrors.length === 0,
   JSON.stringify({ printResult, printErrors }));
+
+// --- 等角(アイソメ)スナップ: resolvePointが等角格子点を返す ---
+const isoSnap = await page.evaluate(() => {
+  window.SimpleCAD.clearAll();
+  const st = window.SimpleCAD.state;
+  st.grid.iso = true; st.grid.snap = true; st.grid.osnap = false; st.grid.step = 10;
+  const w = window.SimpleCAD.resolvePoint(213, 147);
+  const s = 10, c = Math.cos(Math.PI / 6) * s, sn = Math.sin(Math.PI / 6) * s;
+  const ux = c, uy = sn, vx = -c, vy = sn, det = ux * vy - vx * uy;
+  const i = (w.x * vy - vx * w.y) / det, j = (ux * w.y - w.x * uy) / det;
+  st.grid.iso = false; st.grid.osnap = true;
+  return { x: w.x, y: w.y, di: Math.abs(i - Math.round(i)), dj: Math.abs(j - Math.round(j)) };
+});
+check('等角スナップ: resolvePointは等角格子点に吸着する',
+  Number.isFinite(isoSnap.x) && isoSnap.di < 1e-6 && isoSnap.dj < 1e-6,
+  JSON.stringify(isoSnap));
+await page.evaluate(() => window.SimpleCAD.clearAll());
+
+// --- 展開図(ネット)生成: 直方体・円柱・円錐 ---
+async function genNet(type, withDim) {
+  await page.evaluate(() => window.SimpleCAD.clearAll());
+  await page.click('#btnNet');
+  await page.waitForFunction(() => document.getElementById('netDlg').style.display === 'flex');
+  await page.selectOption('#netType', type);
+  await page.evaluate((wd) => { document.getElementById('netDimChk').checked = wd; }, withDim);
+  await page.click('#netOk');
+  await page.waitForFunction(() => document.getElementById('netDlg').style.display === 'none');
+  return await page.evaluate(() => {
+    const dump = window.SimpleCAD.dumpJSON();
+    const shapes = dump.shapes || [];
+    const types = {}; let dashed = 0;
+    for (const s of shapes) { types[s.type] = (types[s.type] || 0) + 1; if (s.dash === 'dashed') dashed++; }
+    return { sc: window.SimpleCAD.shapeCount(), types, dashed };
+  });
+}
+const netBox = await genNet('box', true);
+check('展開図: 直方体は6面の展開(折り線5本=破線)と寸法3本を生成する',
+  netBox.sc >= 19 && netBox.dashed >= 5 && (netBox.types.dim || 0) >= 3,
+  JSON.stringify(netBox));
+const netCyl = await genNet('cylinder', true);
+check('展開図: 円柱は側面矩形(上下=折り線)と上下2円・寸法を生成する',
+  (netCyl.types.line || 0) >= 4 && (netCyl.types.circle || 0) === 2 && netCyl.dashed >= 2 && (netCyl.types.dim || 0) >= 1,
+  JSON.stringify(netCyl));
+const netCone = await genNet('cone', true);
+check('展開図: 円錐は扇形(母線2本+弧)と底面円を生成する',
+  (netCone.types.line || 0) >= 2 && (netCone.types.polyline || 0) >= 1 && (netCone.types.circle || 0) === 1,
+  JSON.stringify(netCone));
+const netNoDim = await genNet('cylinder', false);
+check('展開図: 寸法OFFでは寸法線を生成しない',
+  (netNoDim.types.dim || 0) === 0,
+  JSON.stringify(netNoDim));
+await page.evaluate(() => window.SimpleCAD.clearAll());
 
   // 後始末
 check('最終的にコンソールエラーなし', consoleErrors.length === 0, consoleErrors.join(' | '));

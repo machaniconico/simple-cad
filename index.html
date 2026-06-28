@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#1e293b">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="simplecad.ico" type="image/x-icon">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -161,6 +162,11 @@
   #help ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
   #help b { color: #fff; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 12px; }
   #helpClose, #arrayClose { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 8px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
+  #netDlg { position: absolute; inset: 0; background: rgba(2,6,23,.7); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+  #netDlg input, #netDlg select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  #netDlg .helpcard { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; max-width: 320px; width: 100%; max-height: 86%; overflow-y: auto; padding: 18px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #netDlg h2 { margin: 0 0 10px; font-size: 17px; color: var(--accent); }
+  #netClose { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 8px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
   .toast {
     position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(15,23,42,.95); border: 1px solid var(--accent); color: var(--text);
@@ -240,6 +246,7 @@
       <button class="tbtn" id="btnLoad" title="JSON読込">📂 読込</button>
       <button class="tbtn" id="btnImport" title="DXF / SVG を取り込み">📥 取込</button>
       <button class="tbtn" id="btnImg" title="画像を配置(トレース用)">🖼 画像</button>
+      <button class="tbtn" id="btnNet" title="展開図を生成(直方体・円柱・円錐)">📦 展開図</button>
       <span class="group" style="position:relative">
         <button class="tbtn" id="btnExport" title="書き出し" aria-haspopup="menu" aria-expanded="false" aria-controls="exportMenu">⬇ 書出 ▾</button>
         <div id="exportMenu" class="menu" style="display:none" role="menu" aria-label="書き出し形式" aria-hidden="true">
@@ -298,6 +305,7 @@
         <label class="chk"><input type="checkbox" id="cGrid" checked> グリッド</label>
         <label class="chk"><input type="checkbox" id="cSnap" checked> グリッド吸着</label>
         <label class="chk"><input type="checkbox" id="cOsnap" checked> 端点スナップ</label>
+        <label class="chk"><input type="checkbox" id="cIso"> 等角(アイソメ)グリッド</label>
         <label class="chk"><input type="checkbox" id="cLight" checked> 用紙(白)モード</label>
         <label>小数桁 <select id="gPrec">
           <option value="0">0</option>
@@ -403,6 +411,25 @@
       </div>
     </div>
 
+    <!-- 展開図 -->
+    <div id="netDlg" style="display:none" role="dialog" aria-modal="true" aria-labelledby="netTitle" aria-hidden="true" tabindex="-1">
+      <div class="helpcard">
+        <button id="netClose" title="閉じる">✕</button>
+        <h2 id="netTitle">📦 展開図を作成</h2>
+        <label style="display:flex;justify-content:space-between;margin:6px 0">種類 <select id="netType" style="width:140px">
+          <option value="box">直方体</option>
+          <option value="cylinder">円柱</option>
+          <option value="cone">円錐</option>
+        </select></label>
+        <label class="netRow" id="netRowA" style="display:flex;justify-content:space-between;margin:6px 0"><span id="netLblA">幅 W</span> <input type="number" id="netA" min="1" max="1000" value="60" style="width:90px"> mm</label>
+        <label class="netRow" id="netRowB" style="display:flex;justify-content:space-between;margin:6px 0"><span id="netLblB">奥行 D</span> <input type="number" id="netB" min="1" max="1000" value="40" style="width:90px"> mm</label>
+        <label class="netRow" id="netRowC" style="display:flex;justify-content:space-between;margin:6px 0"><span id="netLblC">高さ H</span> <input type="number" id="netC" min="1" max="1000" value="50" style="width:90px"> mm</label>
+        <label class="chk" style="display:flex;align-items:center;gap:6px;margin:8px 0"><input type="checkbox" id="netDimChk" checked> 寸法を入れる</label>
+        <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">折り線は破線で出力されます</div>
+        <button id="netOk" class="tbtn" style="width:100%;margin-top:4px;background:var(--accent2);color:#001;border:none;height:38px;border-radius:8px;cursor:pointer">作成</button>
+      </div>
+    </div>
+
     <!-- ヘルプ -->
     <div id="help" style="display:none" role="dialog" aria-modal="true" aria-labelledby="helpTitle" aria-hidden="true" tabindex="-1">
       <div class="helpcard">
@@ -415,6 +442,12 @@
           <li>文字は選択中にプロパティ欄で左/中央/右に整列</li>
           <li>画面フィット <b>F</b> / ヘルプ <b>?</b></li>
           <li>正多角形は左パレットの ⬡（辺数は右パネル）</li>
+        </ul>
+        <h3>見取り図・展開図</h3>
+        <ul>
+          <li><b>等角(アイソメ)グリッド</b>: 右パネルで ON にすると30°の等角格子に吸着し見取り図が描けます。線・連線で <b>Shift</b> を押すと30/90/150°の等角軸にロック</li>
+          <li><b>作図中の数値表示</b>: 線・連線を引くと長さと角度がカーソル付近に表示され、円は直径(⌀)も表示されます</li>
+          <li><b>展開図</b>: 上部の <b>📦 展開図</b> から直方体・円柱・円錐を寸法指定で生成（折り線=破線、寸法付き）</li>
         </ul>
         <h3>操作</h3>
         <ul>
@@ -658,7 +691,7 @@ function closeDialog(dialog) {
 // ---- 状態 ----
 function defaultStyle() { return { stroke: '#000000', strokeWidth: 2, fill: null, fontSize: 16, sides: 6, dash: 'solid', dashOffset: 0, lineCap: 'round', lineJoin: 'round', miterLimit: 4 }; }
 function defaultView() { return { scale: 2, offsetX: 0, offsetY: 0 }; }
-function defaultGrid() { return { show: true, snap: true, osnap: true, step: 10 }; }
+function defaultGrid() { return { show: true, snap: true, osnap: true, step: 10, iso: false }; }
 function defaultUi() { return { light: true, precision: 1 }; }
 const state = {
   shapes: [],                          // 図形配列
@@ -800,7 +833,13 @@ function selectionInputValues(src, allowScalar = true) {
     const iter = src && src[Symbol.iterator];
     if (typeof iter === 'function') {
       const out = [];
-      for (const id of src) {
+      const iterator = iter.call(src);
+      const next = iterator && iterator.next;
+      if (typeof next !== 'function') return out;
+      for (let i = 0; i < MAX_SHAPES; i++) {
+        const item = next.call(iterator);
+        if (!item || item.done) break;
+        const id = item.value;
         if (pushSelectionValue(out, id)) break;
       }
       return out;
@@ -1230,7 +1269,8 @@ function safeGetAttr(el, name, fallback = null) {
     if (value !== undefined) return value;
     const list = safeArrayFromList(attrs);
     if (list) {
-      for (const item of list) {
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
         const itemValue = acceptAttr(item);
         if (itemValue !== undefined) return itemValue;
       }
@@ -1369,7 +1409,8 @@ function safeClearElement(el) {
     if (typeof removeChild !== 'function') return false;
     const children = safeChildNodes(el);
     if (!children.length) return true;
-    for (const child of children) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
       try { removeChild.call(el, child); } catch (e) {}
     }
     return true;
@@ -1431,9 +1472,14 @@ function safeArrayFromList(list) {
     try {
       const out = [];
       let count = 0;
-      for (const item of list) {
-        if (count++ >= 100000) break;
-        out.push(item);
+      const iter = list && list[Symbol.iterator];
+      const iterator = typeof iter === 'function' ? iter.call(list) : null;
+      const next = iterator && iterator.next;
+      if (typeof next !== 'function') return null;
+      while (count++ < 100000) {
+        const item = next.call(iterator);
+        if (!item || item.done) break;
+        out.push(item.value);
       }
       return out;
     } catch (err) {
@@ -1656,7 +1702,8 @@ function safeSimpleSelectorMatches(el, selector) {
     return '';
   }).trim();
   if (!text || text.includes(':') || /[\s>+~]/.test(text)) return false;
-  for (const notSelector of notSelectors) {
+  for (let i = 0; i < notSelectors.length; i++) {
+    const notSelector = notSelectors[i];
     if (notSelector && safeSimpleSelectorMatches(el, notSelector)) return false;
   }
   let rest = text;
@@ -1921,6 +1968,7 @@ function gridShowEnabled() { return boolValue(safeProp(ensureStateObject('grid',
 function gridSnapEnabled() { return boolValue(safeProp(ensureStateObject('grid', defaultGrid), 'snap', true), true); }
 function gridOsnapEnabled() { return boolValue(safeProp(ensureStateObject('grid', defaultGrid), 'osnap', true), true); }
 function gridStepValue() { return clampNumber(safeProp(ensureStateObject('grid', defaultGrid), 'step', 10), 1, 100, 10); }
+function gridIsoEnabled() { return boolValue(safeProp(ensureStateObject('grid', defaultGrid), 'iso', false), false); }
 function lightModeEnabled() { return boolValue(safeProp(ensureStateObject('ui', defaultUi), 'light', false), false); }
 function uiPrecisionValue() {
   return clampInteger(safeProp(ensureStateObject('ui', defaultUi), 'precision', 1), 0, 3, 1);
@@ -1933,6 +1981,7 @@ function normalizePrefs() {
     snap: boolValue(safeProp(grid, 'snap', true), true),
     osnap: boolValue(safeProp(grid, 'osnap', true), true),
     step: clampNumber(safeProp(grid, 'step', 10), 1, 100, 10),
+    iso: boolValue(safeProp(grid, 'iso', false), false),
   });
   safeSetStateValue('ui', {
     light: boolValue(safeProp(ui, 'light', false), false),
@@ -1947,16 +1996,19 @@ function sanitizedGridFromSource(src, fallback = defaultGrid()) {
     snap: boolValue(safeProp(base, 'snap', true), true),
     osnap: boolValue(safeProp(base, 'osnap', true), true),
     step: clampNumber(safeProp(base, 'step', 10), 1, 100, 10),
+    iso: boolValue(safeProp(base, 'iso', false), false),
   };
   if (src && typeof src === 'object') {
     const show = safeProp(src, 'show', MISSING_PROP);
     const snap = safeProp(src, 'snap', MISSING_PROP);
     const osnap = safeProp(src, 'osnap', MISSING_PROP);
     const step = safeProp(src, 'step', MISSING_PROP);
+    const iso = safeProp(src, 'iso', MISSING_PROP);
     if (show !== MISSING_PROP) out.show = boolValue(show, out.show);
     if (snap !== MISSING_PROP) out.snap = boolValue(snap, out.snap);
     if (osnap !== MISSING_PROP) out.osnap = boolValue(osnap, out.osnap);
     if (step !== MISSING_PROP && isNum(step) && step > 0) out.step = Math.min(100, Math.max(1, +step));
+    if (iso !== MISSING_PROP) out.iso = boolValue(iso, out.iso);
   }
   return out;
 }
@@ -2468,8 +2520,23 @@ function resize() {
 safeAddEventListener(window, 'resize', resize);
 
 // ---- スナップ ----
+// 等角(アイソメ)格子の基底ベクトル(見取り図用)。u=右下30°軸 / v=左下30°軸。u+v=(0,step)で鉛直軸も格子に含まれる
+const ISO_ANG = Math.PI / 6; // 30°
+function isoBasis() {
+  const s = gridStepValue();
+  return { ux: Math.cos(ISO_ANG) * s, uy: Math.sin(ISO_ANG) * s, vx: -Math.cos(ISO_ANG) * s, vy: Math.sin(ISO_ANG) * s };
+}
+function snapToIso(w) {
+  const b = isoBasis();
+  const det = b.ux * b.vy - b.vx * b.uy;
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-9) return w;
+  const i = Math.round((w.x * b.vy - b.vx * w.y) / det);
+  const j = Math.round((b.ux * w.y - w.x * b.uy) / det);
+  return { x: i * b.ux + j * b.vx, y: i * b.uy + j * b.vy };
+}
 function snapToGrid(w) {
   if (!gridSnapEnabled()) return w;
+  if (gridIsoEnabled()) return snapToIso(w);
   const s = gridStepValue();
   return { x: Math.round(w.x / s) * s, y: Math.round(w.y / s) * s };
 }
@@ -3575,31 +3642,76 @@ function draw() {
 }
 
 function drawGrid() {
-  const step = gridStepValue();
-  const scale = viewScale();
-  // 画面に見えるワールド範囲
-  const x0 = S2Wx(0), y0 = S2Wy(0), x1 = S2Wx(viewW), y1 = S2Wy(viewH);
-  // ステップが細かすぎて潰れる場合は間引く
-  let gs = step;
-  while (gs * scale < 6) gs *= 5;
-
   const light = lightModeEnabled();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = light ? 'rgba(0,0,0,0.10)' : 'rgba(148,163,184,0.12)';
-  ctx.beginPath();
-  for (let x = Math.floor(x0 / gs) * gs; x <= x1; x += gs) {
-    const sx = W2Sx(x); ctx.moveTo(sx, 0); ctx.lineTo(sx, viewH);
-  }
-  for (let y = Math.floor(y0 / gs) * gs; y <= y1; y += gs) {
-    const sy = W2Sy(y); ctx.moveTo(0, sy); ctx.lineTo(viewW, sy);
-  }
-  ctx.stroke();
+  if (gridIsoEnabled()) {
+    drawIsoGrid(light);
+  } else {
+    const step = gridStepValue();
+    const scale = viewScale();
+    // 画面に見えるワールド範囲
+    const x0 = S2Wx(0), y0 = S2Wy(0), x1 = S2Wx(viewW), y1 = S2Wy(viewH);
+    // ステップが細かすぎて潰れる場合は間引く
+    let gs = step;
+    while (gs * scale < 6) gs *= 5;
 
-  // 原点軸
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = light ? 'rgba(0,0,0,0.10)' : 'rgba(148,163,184,0.12)';
+    ctx.beginPath();
+    for (let x = Math.floor(x0 / gs) * gs; x <= x1; x += gs) {
+      const sx = W2Sx(x); ctx.moveTo(sx, 0); ctx.lineTo(sx, viewH);
+    }
+    for (let y = Math.floor(y0 / gs) * gs; y <= y1; y += gs) {
+      const sy = W2Sy(y); ctx.moveTo(0, sy); ctx.lineTo(viewW, sy);
+    }
+    ctx.stroke();
+  }
+
+  // 原点軸(矩形/等角 共通)
   ctx.strokeStyle = light ? 'rgba(14,165,233,0.5)' : 'rgba(56,189,248,0.45)';
   ctx.beginPath();
   ctx.moveTo(W2Sx(0), 0); ctx.lineTo(W2Sx(0), viewH);
   ctx.moveTo(0, W2Sy(0)); ctx.lineTo(viewW, W2Sy(0));
+  ctx.stroke();
+}
+
+// 等角(アイソメ)格子: u方向とv方向の2系統の平行線で見取り図用の菱形グリッドを描く
+function drawIsoGrid(light) {
+  const b = isoBasis();
+  const scale = viewScale();
+  const det = b.ux * b.vy - b.vx * b.uy;
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-9) return;
+  // 画面4隅をワールド→格子指数(i,j)へ逆変換し描画範囲を求める
+  const inv = (x, y) => ({ i: (x * b.vy - b.vx * y) / det, j: (b.ux * y - x * b.uy) / det });
+  const corners = [inv(S2Wx(0), S2Wy(0)), inv(S2Wx(viewW), S2Wy(0)), inv(S2Wx(0), S2Wy(viewH)), inv(S2Wx(viewW), S2Wy(viewH))];
+  let iMin = Infinity, iMax = -Infinity, jMin = Infinity, jMax = -Infinity;
+  for (let k = 0; k < corners.length; k++) {
+    const c = corners[k];
+    if (!Number.isFinite(c.i) || !Number.isFinite(c.j)) return;
+    iMin = Math.min(iMin, c.i); iMax = Math.max(iMax, c.i);
+    jMin = Math.min(jMin, c.j); jMax = Math.max(jMax, c.j);
+  }
+  iMin = Math.floor(iMin) - 1; iMax = Math.ceil(iMax) + 1;
+  jMin = Math.floor(jMin) - 1; jMax = Math.ceil(jMax) + 1;
+  // 間引き(線間隔が細かすぎる時)と暴走防止の安全上限
+  let m = 1;
+  const perpPx = gridStepValue() * scale * 0.866; // 隣接平行線の画面間隔の目安
+  while (perpPx * m < 6) m *= 2;
+  const MAXLINES = 600;
+  while ((iMax - iMin) / m > MAXLINES || (jMax - jMin) / m > MAXLINES) m *= 2;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = light ? 'rgba(0,0,0,0.10)' : 'rgba(148,163,184,0.12)';
+  ctx.beginPath();
+  const startJ = Math.ceil(jMin / m) * m, startI = Math.ceil(iMin / m) * m;
+  for (let j = startJ; j <= jMax; j += m) {
+    const ax = iMin * b.ux + j * b.vx, ay = iMin * b.uy + j * b.vy;
+    const bx = iMax * b.ux + j * b.vx, by = iMax * b.uy + j * b.vy;
+    ctx.moveTo(W2Sx(ax), W2Sy(ay)); ctx.lineTo(W2Sx(bx), W2Sy(by));
+  }
+  for (let i = startI; i <= iMax; i += m) {
+    const ax = i * b.ux + jMin * b.vx, ay = i * b.uy + jMin * b.vy;
+    const bx = i * b.ux + jMax * b.vx, by = i * b.uy + jMax * b.vy;
+    ctx.moveTo(W2Sx(ax), W2Sy(ay)); ctx.lineTo(W2Sx(bx), W2Sy(by));
+  }
   ctx.stroke();
 }
 
@@ -3989,7 +4101,7 @@ function drawDraft() {
     showMeasure(x + s.w * scale / 2, y + s.h * scale / 2, label);
   } else if (s.type === 'circle') {
     ctx.arc(W2Sx(s.cx), W2Sy(s.cy), s.r * scale, 0, Math.PI * 2); ctx.stroke();
-    label = 'r ' + fmtLen(s.r) + ' mm';
+    label = '⌀' + fmtLen(s.r * 2) + ' (r' + fmtLen(s.r) + ') mm';
     showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
   } else if (s.type === 'ellipse') {
     ctx.ellipse(W2Sx(s.cx), W2Sy(s.cy), s.rx * scale, s.ry * scale, 0, 0, Math.PI * 2); ctx.stroke();
@@ -4022,6 +4134,19 @@ function drawPolyDraft() {
   // 始点近接ハイライト（閉じる予告）
   ctx.strokeStyle = 'rgba(56,189,248,.6)';
   ctx.beginPath(); ctx.arc(W2Sx(p[0].x), W2Sy(p[0].y), 9, 0, 7); ctx.stroke();
+  // 次セグメントのライブ寸法(長さ・角度): 直前頂点→現在のスナップ済みカーソル
+  const last = p[p.length - 1];
+  let cw = snapMarker;
+  if (!cw && hoverScreen) cw = { x: S2Wx(hoverScreen.x), y: S2Wy(hoverScreen.y) };
+  if (cw && last && (cw.x !== last.x || cw.y !== last.y)) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(125,211,252,.7)'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]); ctx.lineDashOffset = 0;
+    ctx.beginPath(); ctx.moveTo(W2Sx(last.x), W2Sy(last.y)); ctx.lineTo(W2Sx(cw.x), W2Sy(cw.y)); ctx.stroke();
+    ctx.restore();
+    const deg = (-Math.atan2(cw.y - last.y, cw.x - last.x) * 180 / Math.PI + 360) % 360;
+    const label = fmtLen(Math.hypot(cw.x - last.x, cw.y - last.y)) + ' mm ∠' + deg.toFixed(0) + '°';
+    showMeasure((W2Sx(last.x) + W2Sx(cw.x)) / 2, (W2Sy(last.y) + W2Sy(cw.y)) / 2, label);
+  }
 }
 
 function drawMarquee() {
@@ -5081,7 +5206,7 @@ function doHandleDrag(p) {
     // pointerをローカル座標へ(中心まわり逆回転)
     const lp = rotatePt(wx, wy, handleDrag.center.x, handleDrag.center.y, -handleDrag.angle);
     let lx = lp.x, ly = lp.y;
-    if (gridSnapEnabled()) { const g = gridStepValue(); lx = Math.round(lx / g) * g; ly = Math.round(ly / g) * g; }
+    if (gridSnapEnabled() && !gridIsoEnabled()) { const g = gridStepValue(); lx = Math.round(lx / g) * g; ly = Math.round(ly / g) * g; } // 等角モードでは矩形格子へ吸着させない(端点スナップは有効)
     const a = handleDrag.anchorLocal, o = handleDrag.origCornerLocal;
     const dxo = o.x - a.x, dyo = o.y - a.y;
     let sx = Math.abs(dxo) > 1e-6 ? (lx - a.x) / dxo : 1;
@@ -5127,8 +5252,13 @@ function onToolMove(p) {
         if (b) {
           const g = gridStepValue();
           const ax = b.x + dx, ay = b.y + dy;
-          dx += Math.round(ax / g) * g - ax;
-          dy += Math.round(ay / g) * g - ay;
+          if (gridIsoEnabled()) { // 等角モードは等角格子点へ寄せる(見取り図の整合を保つ)
+            const sp = snapToIso({ x: ax, y: ay });
+            dx += sp.x - ax; dy += sp.y - ay;
+          } else {
+            dx += Math.round(ax / g) * g - ax;
+            dy += Math.round(ay / g) * g - ay;
+          }
         }
       }
     }
@@ -5159,9 +5289,14 @@ function onToolMove(p) {
   const w = resolvePoint(p.x, p.y);
   if (draft.type === 'line' || draft.type === 'dim') {
     let ex = w.x, ey = w.y;
-    if (shiftHeld) { // 0/45/90度に拘束
+    if (shiftHeld) { // 等角ON時は30/90/150…の等角軸へ、通常は0/45/90度に拘束
       const dx = ex - draft.x1, dy = ey - draft.y1, len = Math.hypot(dx, dy);
-      const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+      let a;
+      if (gridIsoEnabled()) {
+        a = Math.round((Math.atan2(dy, dx) - ISO_ANG) / (Math.PI / 3)) * (Math.PI / 3) + ISO_ANG;
+      } else {
+        a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+      }
       ex = draft.x1 + len * Math.cos(a); ey = draft.y1 + len * Math.sin(a);
     }
     draft.x2 = ex; draft.y2 = ey;
@@ -5782,6 +5917,8 @@ function setGridPreference(key, value) {
 safeSetHandler(cGrid, 'onchange', e => { setGridPreference('show', controlChecked(e, cGrid, gridShowEnabled())); draw(); commitPrefsHistory(); });
 safeSetHandler(cSnap, 'onchange', e => { setGridPreference('snap', controlChecked(e, cSnap, gridSnapEnabled())); commitPrefsHistory(); });
 safeSetHandler(cOsnap, 'onchange', e => { setGridPreference('osnap', controlChecked(e, cOsnap, gridOsnapEnabled())); commitPrefsHistory(); });
+const cIso = safeGetElementById('cIso');
+safeSetHandler(cIso, 'onchange', e => { setGridPreference('iso', controlChecked(e, cIso, gridIsoEnabled())); draw(); commitPrefsHistory(); });
 safeSetHandler(cLight, 'onchange', e => {
   const ui = sanitizedUiFromSource(ensureStateObject('ui', defaultUi), defaultUi());
   ui.light = controlChecked(e, cLight, lightModeEnabled());
@@ -6925,6 +7062,147 @@ safeAddEventListener(arrayDlg, 'keydown', e => {
   stopKeyPropagation(e);
   trapFocus(arrayDlg, e);
   if (keyEventKey(e) === 'Escape') { preventKeyDefault(e); closeArrayDlg(); }
+});
+
+// ===== 展開図(ネット)生成: 直方体・円柱・円錐 =====
+const netDlg = safeGetElementById('netDlg');
+const NET_DIM_MAX = 1000;
+function closeNetDlg() { closeDialog(netDlg); }
+function netSyncFields() {
+  const type = safeGetValueById('netType', 'box');
+  const rowB = safeGetElementById('netRowB');
+  if (type === 'box') {
+    safeSetText(safeGetElementById('netLblA'), '幅 W');
+    safeSetText(safeGetElementById('netLblB'), '奥行 D');
+    safeSetText(safeGetElementById('netLblC'), '高さ H');
+    safeSetDisplay(rowB, 'flex');
+  } else if (type === 'cylinder') {
+    safeSetText(safeGetElementById('netLblA'), '直径 ⌀');
+    safeSetText(safeGetElementById('netLblC'), '高さ H');
+    safeSetDisplay(rowB, 'none');
+  } else { // cone
+    safeSetText(safeGetElementById('netLblA'), '底面半径 r');
+    safeSetText(safeGetElementById('netLblC'), '高さ H');
+    safeSetDisplay(rowB, 'none');
+  }
+}
+function openNetDlg(opener) { netSyncFields(); openDialog(netDlg, opener, safeGetElementById('netType')); }
+function netInput(id, fallback) {
+  const v = clampNumber(safeGetValueById(id, String(fallback)), 1, NET_DIM_MAX, fallback);
+  safeSetValueById(id, String(v));
+  return v;
+}
+function runNet() {
+  const type = safeGetValueById('netType', 'box');
+  const chk = safeGetElementById('netDimChk');
+  let withDim = true; try { withDim = !!(chk && chk.checked); } catch (e) {}
+  const layer = activeLayerForCreate();
+  if (!layer) { closeNetDlg(); return; }
+  const color = safeProp(normalizeStyle(), 'stroke', '#000000');
+  const lines = [];   // {x1,y1,x2,y2,fold}
+  const circles = []; // {cx,cy,r}
+  const polys = [];   // {points,closed}
+  const dims = [];    // {x1,y1,x2,y2}
+  const faces = [];   // [[{x,y}...]] 共有辺を折り線(破線)、外周を実線に振り分け
+
+  if (type === 'box') {
+    const W = netInput('netA', 60), D = netInput('netB', 40), H = netInput('netC', 50);
+    const rect = (x, y, w, h) => [{ x: x, y: y }, { x: x + w, y: y }, { x: x + w, y: y + h }, { x: x, y: y + h }];
+    faces.push(rect(0, 0, W, H));     // 前
+    faces.push(rect(0, -D, W, D));    // 上
+    faces.push(rect(0, H, W, D));     // 下
+    faces.push(rect(-D, 0, D, H));    // 左
+    faces.push(rect(W, 0, D, H));     // 右
+    faces.push(rect(W + D, 0, W, H)); // 後(右の隣)
+    if (withDim) {
+      dims.push({ x1: 0, y1: -D - 10, x2: W, y2: -D - 10 }); // W
+      dims.push({ x1: -D - 10, y1: 0, x2: -D - 10, y2: H }); // H
+      dims.push({ x1: W, y1: -10, x2: W + D, y2: -10 });     // D
+    }
+  } else if (type === 'cylinder') {
+    const D = netInput('netA', 60), H = netInput('netC', 50);
+    const r = D / 2, W = Math.PI * D;
+    lines.push({ x1: 0, y1: 0, x2: 0, y2: H, fold: false }); // 左
+    lines.push({ x1: W, y1: 0, x2: W, y2: H, fold: false }); // 右
+    lines.push({ x1: 0, y1: 0, x2: W, y2: 0, fold: true });  // 上(折り)
+    lines.push({ x1: 0, y1: H, x2: W, y2: H, fold: true });  // 下(折り)
+    circles.push({ cx: W / 2, cy: -r, r: r });               // 上面
+    circles.push({ cx: W / 2, cy: H + r, r: r });            // 下面
+    if (withDim) {
+      dims.push({ x1: 0, y1: H + 10, x2: W, y2: H + 10 });   // 周長 πD
+      dims.push({ x1: W + 10, y1: 0, x2: W + 10, y2: H });   // H
+    }
+  } else { // cone
+    const R = netInput('netA', 40), H = netInput('netC', 50);
+    const l = Math.hypot(R, H);
+    const th = l > 0 ? (2 * Math.PI * R) / l : 0;
+    const N = Math.max(12, Math.round(th / (Math.PI / 36)));
+    const arc = [];
+    for (let k = 0; k <= N; k++) { const a = -th / 2 + th * k / N; arc.push({ x: l * Math.sin(a), y: l * Math.cos(a) }); }
+    lines.push({ x1: 0, y1: 0, x2: arc[0].x, y2: arc[0].y, fold: false });     // 母線1
+    lines.push({ x1: 0, y1: 0, x2: arc[N].x, y2: arc[N].y, fold: false });     // 母線2
+    polys.push({ points: arc, closed: false });                                // 扇形の弧
+    circles.push({ cx: 0, cy: l + R, r: R });                                  // 底面円
+    if (withDim) dims.push({ x1: -R, y1: l + R, x2: R, y2: l + R });           // 底面直径
+  }
+
+  // 多面体の面 → 辺の重複数で実線/折り線を判定
+  if (faces.length) {
+    const round = v => Math.round(v * 1000) / 1000;
+    const ekey = (a, b) => { const ka = round(a.x) + ',' + round(a.y), kb = round(b.x) + ',' + round(b.y); return ka < kb ? ka + '|' + kb : kb + '|' + ka; };
+    const emap = new Map();
+    for (let fi = 0; fi < faces.length; fi++) {
+      const f = faces[fi];
+      for (let i = 0; i < f.length; i++) {
+        const a = f[i], b = f[(i + 1) % f.length], k = ekey(a, b), ex = emap.get(k);
+        if (ex) ex.count++; else emap.set(k, { a: a, b: b, count: 1 });
+      }
+    }
+    emap.forEach(e => { lines.push({ x1: e.a.x, y1: e.a.y, x2: e.b.x, y2: e.b.y, fold: e.count >= 2 }); });
+  }
+
+  // 図形全体のbboxを求めビュー中央へ寄せる
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const acc = (x, y) => { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; };
+  for (let i = 0; i < lines.length; i++) { acc(lines[i].x1, lines[i].y1); acc(lines[i].x2, lines[i].y2); }
+  for (let i = 0; i < circles.length; i++) { acc(circles[i].cx - circles[i].r, circles[i].cy - circles[i].r); acc(circles[i].cx + circles[i].r, circles[i].cy + circles[i].r); }
+  for (let i = 0; i < polys.length; i++) { const p = polys[i].points; for (let j = 0; j < p.length; j++) acc(p[j].x, p[j].y); }
+  for (let i = 0; i < dims.length; i++) { acc(dims[i].x1, dims[i].y1); acc(dims[i].x2, dims[i].y2); } // 寸法線も含めて中央寄せ
+  if (!Number.isFinite(minX)) { closeNetDlg(); return; }
+  const dx = S2Wx(viewW / 2) - (minX + maxX) / 2, dy = S2Wy(viewH / 2) - (minY + maxY) / 2;
+
+  const out = [];
+  for (let i = 0; i < lines.length; i++) { const L = lines[i]; out.push({ id: uid(), type: 'line', x1: L.x1 + dx, y1: L.y1 + dy, x2: L.x2 + dx, y2: L.y2 + dy, stroke: color, strokeWidth: 1.5, fill: null, dash: L.fold ? 'dashed' : 'solid', layer: layer }); }
+  for (let i = 0; i < circles.length; i++) { const c = circles[i]; out.push({ id: uid(), type: 'circle', cx: c.cx + dx, cy: c.cy + dy, r: c.r, stroke: color, strokeWidth: 1.5, fill: null, dash: 'solid', layer: layer }); }
+  for (let i = 0; i < polys.length; i++) { const pts = []; const p = polys[i].points; for (let j = 0; j < p.length; j++) pts.push({ x: p[j].x + dx, y: p[j].y + dy }); out.push({ id: uid(), type: 'polyline', points: pts, closed: !!polys[i].closed, stroke: color, strokeWidth: 1.5, fill: null, dash: 'solid', layer: layer }); }
+  for (let i = 0; i < dims.length; i++) { const d = dims[i]; out.push({ id: uid(), type: 'dim', x1: d.x1 + dx, y1: d.y1 + dy, x2: d.x2 + dx, y2: d.y2 + dy, stroke: '#fbbf24', strokeWidth: 1.5, fill: null, dash: 'solid', layer: layer }); }
+
+  // 図形上限に収まらない場合は中途半端な展開図を作らず中止
+  if (out.length > remainingShapeSlots()) {
+    toast(`図形数の上限(${MAX_SHAPES})に達するため展開図を作成できません`);
+    closeNetDlg(); return;
+  }
+  const created = [];
+  let added = 0;
+  for (let i = 0; i < out.length; i++) { if (addShapeWithLimit(out[i], added === 0)) { created.push(out[i].id); added++; } else break; }
+  if (added) {
+    const sel = ensureSelectionSet();
+    sel.clear();
+    for (let i = 0; i < created.length; i++) sel.add(created[i]);
+    pushHistory();
+    fitView(); // 生成した展開図が画面外に出ないよう全体をフィット(取込処理と同じ慣例)
+  }
+  closeNetDlg(); draw();
+}
+safeSetHandlerById('btnNet', 'onclick', e => openNetDlg(safeEventCurrentTarget(e, safeGetElementById('btnNet'))));
+safeSetHandlerById('netClose', 'onclick', closeNetDlg);
+safeSetHandlerById('netOk', 'onclick', runNet);
+safeSetHandler(safeGetElementById('netType'), 'onchange', netSyncFields);
+safeAddEventListener(netDlg, 'click', e => { if (safeEventTarget(e) === netDlg) closeNetDlg(); });
+safeAddEventListener(netDlg, 'keydown', e => {
+  stopKeyPropagation(e);
+  trapFocus(netDlg, e);
+  if (keyEventKey(e) === 'Escape') { preventKeyDefault(e); closeNetDlg(); }
 });
 
 const selActions = safeGetElementById('selActions');
@@ -8086,9 +8364,10 @@ function dxfPolylineVertexPoints(vertices, closed = false) {
   const pts = [{ x: vertices[0].x, y: -vertices[0].y }];
   const addSegment = (a, b, includeEnd) => {
     const segment = dxfBulgeSegmentPoints(a, b, a.bulge, MAX_POLYLINE_POINTS - pts.length, includeEnd);
-    for (const p of segment) {
-      if (pts.length >= MAX_POLYLINE_POINTS) break;
-      pts.push(p);
+    const len = safeArrayLength(segment, 0);
+    for (let i = 0; i < len && pts.length < MAX_POLYLINE_POINTS; i++) {
+      const p = safeProp(segment, i, null);
+      if (p) pts.push(p);
     }
   };
   for (let i = 0; i + 1 < vertices.length && pts.length < MAX_POLYLINE_POINTS; i++) addSegment(vertices[i], vertices[i + 1], true);
@@ -8114,10 +8393,14 @@ function dxfPolyfaceShapes(poly) {
   const faces = poly && Array.isArray(poly.faces) ? poly.faces : [];
   const base = dxfPolylineStyle(poly);
   const out = [];
-  for (const face of faces) {
-    if (out.length >= MAX_SHAPES) break;
+  const faceLen = safeArrayLength(faces, 0);
+  for (let faceIndex = 0; faceIndex < faceLen && out.length < MAX_SHAPES; faceIndex++) {
+    const face = safeProp(faces, faceIndex, null);
+    if (!Array.isArray(face)) continue;
     const refs = [];
-    for (const raw of face) {
+    const refLen = safeArrayLength(face, 0);
+    for (let refIndex = 0; refIndex < refLen; refIndex++) {
+      const raw = safeProp(face, refIndex, 0);
       const idx = Math.abs(raw);
       if (!idx) break;
       const v = verts[idx - 1];
@@ -8401,6 +8684,13 @@ function dxfPushSamplePoint(out, p) {
   out.push(p);
   return true;
 }
+function dxfPushSamplePointList(out, list, mapPoint = null) {
+  const len = safeArrayLength(list, 0);
+  for (let i = 0; i < len && out.length < MAX_POLYLINE_POINTS; i++) {
+    const p = safeProp(list, i, null);
+    dxfPushSamplePoint(out, typeof mapPoint === 'function' ? mapPoint(p, i) : p);
+  }
+}
 function dxfOpenUniformKnots(count, degree) {
   const knots = [];
   const spanCount = Math.max(1, count - degree);
@@ -8634,10 +8924,7 @@ function dxfHatchPolylineBoundary(pairs, i, out) {
     if (Number.isFinite(x) && Number.isFinite(y)) vertices.push({ x, y, bulge });
   }
   if (vertices.length >= 2) {
-    for (const p of dxfPolylineVertexPoints(vertices, closed)) {
-      if (out.length >= MAX_POLYLINE_POINTS) break;
-      dxfPushSamplePoint(out, p);
-    }
+    dxfPushSamplePointList(out, dxfPolylineVertexPoints(vertices, closed));
   }
   return i;
 }
@@ -8677,24 +8964,15 @@ function dxfHatchReadEdge(pairs, i, out) {
   } else if (edgeType === 2) {
     const v = readNums(setFromList([10, 20, 40, 50, 51, 73]));
     const pts = dxfHatchArcEdgePoints(v[10], v[20], v[40], v[50], v[51], parseInt(v[73] || 0, 10) !== 0, out.length === 0);
-    for (const p of pts) {
-      if (out.length >= MAX_POLYLINE_POINTS) break;
-      dxfPushSamplePoint(out, p);
-    }
+    dxfPushSamplePointList(out, pts);
   } else if (edgeType === 3) {
     const v = readNums(setFromList([10, 20, 11, 21, 40, 50, 51, 73]));
     const pts = dxfHatchEllipseEdgePoints(v[10], v[20], v[11], v[21], v[40], v[50], v[51], parseInt(v[73] || 0, 10) !== 0, out.length === 0);
-    for (const p of pts) {
-      if (out.length >= MAX_POLYLINE_POINTS) break;
-      dxfPushSamplePoint(out, p);
-    }
+    dxfPushSamplePointList(out, pts);
   } else if (edgeType === 4) {
     const v = readAllNums(setFromList([94, 73, 74, 95, 96, 40, 10, 20, 42, 97, 11, 21, 12, 22, 13, 23]));
     const pts = dxfHatchSplineEdgePoints(v, out.length === 0);
-    for (const p of pts) {
-      if (out.length >= MAX_POLYLINE_POINTS) break;
-      dxfPushSamplePoint(out, p);
-    }
+    dxfPushSamplePointList(out, pts);
   } else {
     while (i < pairs.length && pairs[i].code !== 72 && pairs[i].code !== 92) i++;
   }
@@ -8739,7 +9017,8 @@ function dxfFaceCornerPoints(c, g) {
   }
   if (!corners[3] && corners[2]) corners[3] = { ...corners[2] };
   const pts = [];
-  for (const p of corners) {
+  for (let i = 0; i < corners.length; i++) {
+    const p = corners[i];
     if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
     const last = pts[pts.length - 1];
     if (!last || Math.abs(last.x - p.x) > 1e-9 || Math.abs(last.y - p.y) > 1e-9) pts.push(p);
@@ -8865,7 +9144,7 @@ function dxfLeaderPoints(c) {
     if (smooth.length >= 2) return smooth;
   }
   const out = [];
-  for (const p of raw) dxfPushSamplePoint(out, { x: p.x, y: -p.y });
+  dxfPushSamplePointList(out, raw, p => p ? { x: p.x, y: -p.y } : null);
   return out;
 }
 function dxfLeaderArrowShapes(points, style) {
@@ -9107,7 +9386,7 @@ function dxfMlineShape(c, style) {
   const points = [];
   const raw = dxfPointSeries(c, 11, 21);
   if (raw.length) {
-    for (const p of raw) dxfPushSamplePoint(points, { x: p.x, y: -p.y });
+    dxfPushSamplePointList(points, raw, p => p ? { x: p.x, y: -p.y } : null);
   } else {
     const start = dxfPoint(c, 10, 20);
     if (start) dxfPushSamplePoint(points, start);
@@ -9175,12 +9454,10 @@ function dxfWipeoutShape(c, style) {
   const clip = dxfWipeoutClipPoints(c);
   if (!origin || !u || !v || Math.hypot(u.x, u.y) <= 1e-12 || Math.hypot(v.x, v.y) <= 1e-12 || clip.length < 3) return null;
   const points = [];
-  for (const q of clip) {
-    dxfPushSamplePoint(points, {
+  dxfPushSamplePointList(points, clip, q => q ? {
       x: origin.x + u.x * q.x + v.x * q.y,
       y: origin.y + u.y * q.x + v.y * q.y,
-    });
-  }
+    } : null);
   if (points.length < 3) return null;
   return {
     type: 'polyline',
@@ -9206,12 +9483,10 @@ function dxfImageReferenceShapes(c, style, imageDefs = null) {
   const clip = dxfWipeoutClipPoints(c);
   if (!origin || !u || !v || Math.hypot(u.x, u.y) <= 1e-12 || Math.hypot(v.x, v.y) <= 1e-12 || clip.length < 3) return null;
   const points = [];
-  for (const q of clip) {
-    dxfPushSamplePoint(points, {
+  dxfPushSamplePointList(points, clip, q => q ? {
       x: origin.x + u.x * q.x + v.x * q.y,
       y: origin.y + u.y * q.x + v.y * q.y,
-    });
-  }
+    } : null);
   if (points.length < 3) return null;
   const outline = { type: 'polyline', points, closed: true, ...style, fill: null };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -9278,10 +9553,11 @@ function dxfUnderlayReferenceShapes(type, c, style, underlayDefs = null) {
   const rot = -scaleNumber(50, 0) * Math.PI / 180;
   const cs = Math.cos(rot), sn = Math.sin(rot);
   const points = [];
-  for (const q of dxfUnderlayClipPoints(c)) {
+  dxfPushSamplePointList(points, dxfUnderlayClipPoints(c), q => {
+    if (!q) return null;
     const lx = q.x * sx, ly = -q.y * sy;
-    dxfPushSamplePoint(points, { x: origin.x + lx * cs - ly * sn, y: origin.y + lx * sn + ly * cs });
-  }
+    return { x: origin.x + lx * cs - ly * sn, y: origin.y + lx * sn + ly * cs };
+  });
   if (points.length < 3) return null;
   const outline = { type: 'polyline', points, closed: true, ...style, fill: null };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -9409,7 +9685,7 @@ function dxfSectionNumberText(value) {
 }
 function dxfSectionPoints(c, xCode, yCode) {
   const points = [];
-  for (const p of dxfPointSeries(c, xCode, yCode)) dxfPushSamplePoint(points, { x: p.x, y: -p.y });
+  dxfPushSamplePointList(points, dxfPointSeries(c, xCode, yCode), p => p ? { x: p.x, y: -p.y } : null);
   return points;
 }
 function dxfSectionLabelText(c) {
@@ -9850,8 +10126,21 @@ function dxfBlockKey(name) {
     function dxfShapeItems(sh) {
       return Array.isArray(sh) ? safeFilterItems(sh, value => !!value) : (sh ? [sh] : []);
     }
+function dxfForEachArrayItem(list, callback, max = MAX_SHAPES) {
+  if (!list || typeof callback !== 'function') return;
+  const rawLen = safeArrayLength(list, 0);
+  const limit = Math.min(rawLen, Number.isFinite(max) ? Math.max(0, Math.floor(max)) : rawLen);
+  for (let i = 0; i < limit; i++) {
+    const item = safeProp(list, i, null);
+    if (item == null) continue;
+    if (callback(item, i) === false) break;
+  }
+}
+function dxfForEachShapeItem(sh, callback) {
+  dxfForEachArrayItem(dxfShapeItems(sh), callback, MAX_SHAPES);
+}
 function dxfAssignLayerName(sh, layerName) {
-  for (const item of dxfShapeItems(sh)) item._layerName = layerName;
+  dxfForEachShapeItem(sh, item => { item._layerName = layerName; });
   return sh;
 }
 function dxfEntityTypes() {
@@ -10125,23 +10414,23 @@ function dxfTransformShape(s, xf) {
       const matrix = parentXf && parentXf.matrix ? dxfMatrixMultiply(parentXf.matrix, localMatrix) : localMatrix;
       const info = dxfMatrixScaleRot(matrix);
       const xf = { base: block.base, insert, sx: info.sx, sy: info.sy, rot: info.rot, layerName, stroke, dash, strokeWidth, matrix };
-      for (const src of block.shapes) {
-        if (out.length >= MAX_SHAPES) break;
+      dxfForEachArrayItem(block.shapes, src => {
+        if (out.length >= MAX_SHAPES) return false;
         if (src.type === '_dxfAttdef') {
           const tag = dxfAttrTagFromShape(src.shape);
-          if (skipAttdefTags === true || (skipAttdefTags && tag && skipAttdefTags.has(tag))) continue;
+          if (skipAttdefTags === true || (skipAttdefTags && tag && skipAttdefTags.has(tag))) return;
           const sh = dxfTransformShape(src.shape, xf);
           if (sh) out.push(sh);
         } else if (src.type === '_dxfInsert') {
-          for (const sh of dxfExpandInsert(src.c, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, xf, stack.concat(key))) {
-            if (out.length >= MAX_SHAPES) break;
+          dxfForEachArrayItem(dxfExpandInsert(src.c, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, xf, stack.concat(key)), sh => {
+            if (out.length >= MAX_SHAPES) return false;
             out.push(sh);
-          }
+          });
         } else {
           const sh = dxfTransformShape(src, xf);
           if (sh) out.push(sh);
         }
-      }
+      });
     }
   }
   return out;
@@ -10152,13 +10441,13 @@ function dxfBlockDefinitions(ls, layerColors, layerDashes, ltypeDashes, layerStr
   let section = '', pendingSection = false, cur = null, curType = null, poly = null, block = null;
   const addBlockShape = sh => {
     if (!block || !sh) return;
-    for (const item of dxfShapeItems(sh)) {
-      if (block.shapes.length >= MAX_SHAPES) break;
+    dxfForEachShapeItem(sh, item => {
+      if (block.shapes.length >= MAX_SHAPES) return false;
       block.shapes.push(item);
-    }
+    });
   };
   const finishPoly = () => {
-    for (const sh of dxfPolylineShapes(poly)) addBlockShape(sh);
+    dxfForEachArrayItem(dxfPolylineShapes(poly), sh => { addBlockShape(sh); });
     poly = null;
   };
   const flush = () => {
@@ -10225,18 +10514,18 @@ function parseDXF(text) {
     const includeImportEntity = c => dxfEntityVisible(c) && (!preferModelSpace || !dxfEntityPaperSpace(c));
       let section = '', pendingSection = false, cur = null, curType = null, poly = null, pendingInsert = null, pendingAttrs = [], skipPendingInsertAttrs = false;
   const addParsedShape = sh => {
-    for (const item of dxfShapeItems(sh)) {
-      if (shapes.length >= MAX_SHAPES) break;
+    dxfForEachShapeItem(sh, item => {
+      if (shapes.length >= MAX_SHAPES) return false;
       shapes.push(item);
-    }
+    });
     };
       const flushPendingInsert = () => {
         if (!pendingInsert) return;
       const tags = setFromList(safeMapFilterItems(pendingAttrs, dxfAttrTagFromShape));
       const options = tags.size ? { skipAttdefTags: tags } : null;
-      for (const sh of dxfExpandInsert(pendingInsert, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, null, [], options)) addParsedShape(sh);
+      dxfForEachArrayItem(dxfExpandInsert(pendingInsert, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, null, [], options), sh => { addParsedShape(sh); });
     const xf = dxfInsertStyleContext(pendingInsert, layerColors, layerDashes, ltypeDashes, layerStrokeWidths);
-    for (const attr of pendingAttrs) addParsedShape(dxfApplyShapeStyle(attr, xf));
+    dxfForEachArrayItem(pendingAttrs, attr => { addParsedShape(dxfApplyShapeStyle(attr, xf)); });
       pendingInsert = null;
       pendingAttrs = [];
     };
@@ -10246,7 +10535,7 @@ function parseDXF(text) {
       pendingInsert = null;
     };
   const finishPoly = () => {
-    for (const sh of dxfPolylineShapes(poly)) addParsedShape(sh);
+    dxfForEachArrayItem(dxfPolylineShapes(poly), sh => { addParsedShape(sh); });
     poly = null;
   };
   const flush = () => {
@@ -10268,7 +10557,7 @@ function parseDXF(text) {
           pendingInsert = cur;
           pendingAttrs = [];
         } else {
-        for (const sh of dxfExpandInsert(cur, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths)) addParsedShape(sh);
+        dxfForEachArrayItem(dxfExpandInsert(cur, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths), sh => { addParsedShape(sh); });
         }
       } else if (curType === 'ATTRIB') {
         const sh = includeImportEntity(cur) ? dxfToShape(curType, cur, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, imageDefs, underlayDefs) : null;
@@ -10417,13 +10706,15 @@ function svgPathPolys(d) {
   finish();
   return out;
 }
-function* svgDrawableElements(root) {
+function svgDrawableElements(root) {
   const elements = safeTreeWalkerElements(root, MAX_SHAPES * 8);
+  const out = [];
   const elementLen = safeArrayLength(elements, 0);
-  for (let elementIndex = 0; elementIndex < elementLen; elementIndex++) {
+  for (let elementIndex = 0; elementIndex < elementLen && out.length < MAX_SHAPES; elementIndex++) {
     const el = safeProp(elements, elementIndex, null);
-    if (SVG_DRAWABLE_TAGS.has(safeTagName(el)) && !svgInNonRenderingContainer(el)) yield el;
+    if (SVG_DRAWABLE_TAGS.has(safeTagName(el)) && !svgInNonRenderingContainer(el)) out[out.length] = el;
   }
+  return out;
 }
 function svgInNonRenderingContainer(el) {
   for (let n = safeParentNode(el); n && n.getAttribute; n = safeParentNode(n)) {
@@ -10595,7 +10886,10 @@ function svgExpandUses(root) {
       SVG_USE_EXPANSION_MAX + 1
     );
     if (!uses.length) break;
-    for (const use of uses) {
+    const useLen = safeArrayLength(uses, 0);
+    for (let useIndex = 0; useIndex < useLen && expandedUses < SVG_USE_EXPANSION_MAX; useIndex++) {
+      const use = safeProp(uses, useIndex, null);
+      if (!use) continue;
       expanded.add(use);
       const target = ids.get(svgUseHrefId(use));
       const parent = safeParentNode(use);
@@ -10616,7 +10910,6 @@ function svgExpandUses(root) {
       if (!clone || !safeAppend(wrapper, clone) || !safeInsertBefore(parent, wrapper, use)) continue;
       expandedUses++;
       expandedNodes += cost;
-      if (expandedUses >= SVG_USE_EXPANSION_MAX) break;
     }
   }
 }
@@ -10749,8 +11042,11 @@ function parseSVGCore(text) {
   };
   const cssRules = [];
   let cssText = '', styleRules = 0;
-  for (const styleEl of safeElementsByTagName(root, 'style', SVG_STYLE_RULE_MAX + 1)) {
+  const styleElements = safeElementsByTagName(root, 'style', SVG_STYLE_RULE_MAX + 1);
+  const styleElementLen = safeArrayLength(styleElements, 0);
+  for (let styleElementIndex = 0; styleElementIndex < styleElementLen; styleElementIndex++) {
     if (cssText.length >= SVG_STYLE_TEXT_MAX) break;
+    const styleEl = safeProp(styleElements, styleElementIndex, null);
     cssText += '\n' + safeString(safeProp(styleEl, 'textContent', '') || '', '');
   }
   cssText = cssText.slice(0, SVG_STYLE_TEXT_MAX).replace(/\/\*[\s\S]*?\*\//g, '');
@@ -10844,7 +11140,10 @@ function parseSVGCore(text) {
     const target = name.toLowerCase();
     let selected = null;
     let specificity = -1;
-    for (const rule of cssRules) {
+    const ruleLen = safeArrayLength(cssRules, 0);
+    for (let ruleIndex = 0; ruleIndex < ruleLen; ruleIndex++) {
+      const rule = safeProp(cssRules, ruleIndex, null);
+      if (!rule) continue;
       const sel = rule.selector;
       const match = selectorMatches(sel, el);
       const decl = rule.decls[target];
@@ -10980,7 +11279,10 @@ function parseSVGCore(text) {
       alphaSum += alpha * weight;
       for (let i = 0; i < 3; i++) rgbSum[i] += rgb[i] * alpha * weight;
     };
-    for (const stop of stops) {
+    const stopLen = safeArrayLength(stops, 0);
+    for (let stopIndex = 0; stopIndex < stopLen; stopIndex++) {
+      const stop = safeProp(stops, stopIndex, null);
+      if (!stop) continue;
       const off = Math.max(pos, stop.offset);
       if (!prev) {
         add(stop.rgb, stop.alpha, off);
@@ -11004,7 +11306,9 @@ function parseSVGCore(text) {
   const svgAveragePaintColors = samples => {
     let totalWeight = 0, alphaWeight = 0;
     const rgbSum = [0, 0, 0];
-    for (const sample of samples) {
+    const sampleLen = safeArrayLength(samples, 0);
+    for (let sampleIndex = 0; sampleIndex < sampleLen; sampleIndex++) {
+      const sample = safeProp(samples, sampleIndex, null);
       const weight = clampNumber(sample && sample.weight, 0, 1000, 1);
       if (weight <= 0) continue;
       const safe = safeColor(sample && sample.color, null);
@@ -11029,8 +11333,10 @@ function parseSVGCore(text) {
     const walk = node => {
       if (!node || samples.length >= SVG_PATTERN_COLOR_MAX) return;
       const kids = safeChildElements(node);
-      for (const child of kids) {
-        if (samples.length >= SVG_PATTERN_COLOR_MAX) break;
+      const kidLen = safeArrayLength(kids, 0);
+      for (let kidIndex = 0; kidIndex < kidLen && samples.length < SVG_PATTERN_COLOR_MAX; kidIndex++) {
+        const child = safeProp(kids, kidIndex, null);
+        if (!child) continue;
         const tag = safeTagName(child);
         if (!tag || !svgVisible(child)) continue;
         if (tag === 'script' || tag === 'style' || tag === 'defs' || tag === 'symbol' || tag === 'marker' || tag === 'mask' || tag === 'clippath') continue;
@@ -11224,8 +11530,11 @@ function parseSVGCore(text) {
     return info.visible ? info.color : null;
   };
   const parsePoints = str => svgPointList(str);
-  for (const el of svgDrawableElements(root)) {
-    if (shapes.length >= MAX_SHAPES) break;
+  const drawableElements = svgDrawableElements(root);
+  const drawableLen = safeArrayLength(drawableElements, 0);
+  for (let drawableIndex = 0; drawableIndex < drawableLen && shapes.length < MAX_SHAPES; drawableIndex++) {
+    const el = safeProp(drawableElements, drawableIndex, null);
+    if (!el) continue;
     if (!svgVisible(el)) continue;
     const tag = safeTagName(el);
     const tr = svgTransformOf(el);
@@ -11331,8 +11640,11 @@ function parseSVGCore(text) {
       if (src && w > 0 && h > 0 && imageOpacity > 0) shapes.push({ type: 'image', ...tquadBox(x, y, w, h), src, opacity: imageOpacity });
     }
     else if (tag === 'path') {
-      for (const seg of svgPathPolys(safeGetAttr(el, 'd', null))) {
-        if (shapes.length >= MAX_SHAPES) break;
+      const pathSegments = svgPathPolys(safeGetAttr(el, 'd', null));
+      const pathSegmentLen = safeArrayLength(pathSegments, 0);
+      for (let pathSegmentIndex = 0; pathSegmentIndex < pathSegmentLen && shapes.length < MAX_SHAPES; pathSegmentIndex++) {
+        const seg = safeProp(pathSegments, pathSegmentIndex, null);
+        if (!seg) continue;
         if (seg.pts.length >= 2 && (seg.closed ? (explicitStroke || fill) : explicitStroke)) shapes.push({ ...base, ...(explicitStroke ? { stroke: explicitStroke } : {}), type: 'polyline', points: tpts(seg.pts), closed: seg.closed, fill: seg.closed ? fill : null });
       }
     }
@@ -11686,7 +11998,11 @@ async function buildPDFBlob(options = {}) {
   push(enc(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`));
 
   let total = new Uint8Array(len), pos = 0;
-  for (const c of chunks) { total.set(c, pos); pos += c.length; }
+  for (let i = 0; i < chunks.length; i++) {
+    const c = chunks[i];
+    total.set(c, pos);
+    pos += c.length;
+  }
   const blob = safeCreateBlob([total], 'application/pdf');
   if (!blob) throw new Error('PDF_BLOB_CREATE_FAILED');
   return blob;
@@ -11982,6 +12298,7 @@ function syncPrefsUI() {
   safeSetCheckedById('cGrid', gridShowEnabled());
   safeSetCheckedById('cSnap', gridSnapEnabled());
   safeSetCheckedById('cOsnap', gridOsnapEnabled());
+  safeSetCheckedById('cIso', gridIsoEnabled());
   safeSetCheckedById('cLight', lightModeEnabled());
   safeSetValueById('gPrec', String(Number.isInteger(safeProp(ui, 'precision', 1)) ? safeProp(ui, 'precision', 1) : 1));
   const gStep = safeGetElementById('gStep');
