@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#1e293b">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="simplecad.ico" type="image/x-icon">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -298,6 +299,7 @@
         <label class="chk"><input type="checkbox" id="cGrid" checked> グリッド</label>
         <label class="chk"><input type="checkbox" id="cSnap" checked> グリッド吸着</label>
         <label class="chk"><input type="checkbox" id="cOsnap" checked> 端点スナップ</label>
+        <label class="chk"><input type="checkbox" id="cIso"> 等角(アイソメ)グリッド</label>
         <label class="chk"><input type="checkbox" id="cLight" checked> 用紙(白)モード</label>
         <label>小数桁 <select id="gPrec">
           <option value="0">0</option>
@@ -658,7 +660,7 @@ function closeDialog(dialog) {
 // ---- 状態 ----
 function defaultStyle() { return { stroke: '#000000', strokeWidth: 2, fill: null, fontSize: 16, sides: 6, dash: 'solid', dashOffset: 0, lineCap: 'round', lineJoin: 'round', miterLimit: 4 }; }
 function defaultView() { return { scale: 2, offsetX: 0, offsetY: 0 }; }
-function defaultGrid() { return { show: true, snap: true, osnap: true, step: 10 }; }
+function defaultGrid() { return { show: true, snap: true, osnap: true, step: 10, iso: false }; }
 function defaultUi() { return { light: true, precision: 1 }; }
 const state = {
   shapes: [],                          // 図形配列
@@ -800,7 +802,13 @@ function selectionInputValues(src, allowScalar = true) {
     const iter = src && src[Symbol.iterator];
     if (typeof iter === 'function') {
       const out = [];
-      for (const id of src) {
+      const iterator = iter.call(src);
+      const next = iterator && iterator.next;
+      if (typeof next !== 'function') return out;
+      for (let i = 0; i < MAX_SHAPES; i++) {
+        const item = next.call(iterator);
+        if (!item || item.done) break;
+        const id = item.value;
         if (pushSelectionValue(out, id)) break;
       }
       return out;
@@ -1230,7 +1238,8 @@ function safeGetAttr(el, name, fallback = null) {
     if (value !== undefined) return value;
     const list = safeArrayFromList(attrs);
     if (list) {
-      for (const item of list) {
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
         const itemValue = acceptAttr(item);
         if (itemValue !== undefined) return itemValue;
       }
@@ -1369,7 +1378,8 @@ function safeClearElement(el) {
     if (typeof removeChild !== 'function') return false;
     const children = safeChildNodes(el);
     if (!children.length) return true;
-    for (const child of children) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
       try { removeChild.call(el, child); } catch (e) {}
     }
     return true;
@@ -1431,9 +1441,14 @@ function safeArrayFromList(list) {
     try {
       const out = [];
       let count = 0;
-      for (const item of list) {
-        if (count++ >= 100000) break;
-        out.push(item);
+      const iter = list && list[Symbol.iterator];
+      const iterator = typeof iter === 'function' ? iter.call(list) : null;
+      const next = iterator && iterator.next;
+      if (typeof next !== 'function') return null;
+      while (count++ < 100000) {
+        const item = next.call(iterator);
+        if (!item || item.done) break;
+        out.push(item.value);
       }
       return out;
     } catch (err) {
@@ -1656,7 +1671,8 @@ function safeSimpleSelectorMatches(el, selector) {
     return '';
   }).trim();
   if (!text || text.includes(':') || /[\s>+~]/.test(text)) return false;
-  for (const notSelector of notSelectors) {
+  for (let i = 0; i < notSelectors.length; i++) {
+    const notSelector = notSelectors[i];
     if (notSelector && safeSimpleSelectorMatches(el, notSelector)) return false;
   }
   let rest = text;
@@ -1921,6 +1937,7 @@ function gridShowEnabled() { return boolValue(safeProp(ensureStateObject('grid',
 function gridSnapEnabled() { return boolValue(safeProp(ensureStateObject('grid', defaultGrid), 'snap', true), true); }
 function gridOsnapEnabled() { return boolValue(safeProp(ensureStateObject('grid', defaultGrid), 'osnap', true), true); }
 function gridStepValue() { return clampNumber(safeProp(ensureStateObject('grid', defaultGrid), 'step', 10), 1, 100, 10); }
+function gridIsoEnabled() { return boolValue(safeProp(ensureStateObject('grid', defaultGrid), 'iso', false), false); }
 function lightModeEnabled() { return boolValue(safeProp(ensureStateObject('ui', defaultUi), 'light', false), false); }
 function uiPrecisionValue() {
   return clampInteger(safeProp(ensureStateObject('ui', defaultUi), 'precision', 1), 0, 3, 1);
@@ -1933,6 +1950,7 @@ function normalizePrefs() {
     snap: boolValue(safeProp(grid, 'snap', true), true),
     osnap: boolValue(safeProp(grid, 'osnap', true), true),
     step: clampNumber(safeProp(grid, 'step', 10), 1, 100, 10),
+    iso: boolValue(safeProp(grid, 'iso', false), false),
   });
   safeSetStateValue('ui', {
     light: boolValue(safeProp(ui, 'light', false), false),
@@ -1947,16 +1965,19 @@ function sanitizedGridFromSource(src, fallback = defaultGrid()) {
     snap: boolValue(safeProp(base, 'snap', true), true),
     osnap: boolValue(safeProp(base, 'osnap', true), true),
     step: clampNumber(safeProp(base, 'step', 10), 1, 100, 10),
+    iso: boolValue(safeProp(base, 'iso', false), false),
   };
   if (src && typeof src === 'object') {
     const show = safeProp(src, 'show', MISSING_PROP);
     const snap = safeProp(src, 'snap', MISSING_PROP);
     const osnap = safeProp(src, 'osnap', MISSING_PROP);
     const step = safeProp(src, 'step', MISSING_PROP);
+    const iso = safeProp(src, 'iso', MISSING_PROP);
     if (show !== MISSING_PROP) out.show = boolValue(show, out.show);
     if (snap !== MISSING_PROP) out.snap = boolValue(snap, out.snap);
     if (osnap !== MISSING_PROP) out.osnap = boolValue(osnap, out.osnap);
     if (step !== MISSING_PROP && isNum(step) && step > 0) out.step = Math.min(100, Math.max(1, +step));
+    if (iso !== MISSING_PROP) out.iso = boolValue(iso, out.iso);
   }
   return out;
 }
@@ -2468,8 +2489,23 @@ function resize() {
 safeAddEventListener(window, 'resize', resize);
 
 // ---- スナップ ----
+// 等角(アイソメ)格子の基底ベクトル(見取り図用)。u=右下30°軸 / v=左下30°軸。u+v=(0,step)で鉛直軸も格子に含まれる
+const ISO_ANG = Math.PI / 6; // 30°
+function isoBasis() {
+  const s = gridStepValue();
+  return { ux: Math.cos(ISO_ANG) * s, uy: Math.sin(ISO_ANG) * s, vx: -Math.cos(ISO_ANG) * s, vy: Math.sin(ISO_ANG) * s };
+}
+function snapToIso(w) {
+  const b = isoBasis();
+  const det = b.ux * b.vy - b.vx * b.uy;
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-9) return w;
+  const i = Math.round((w.x * b.vy - b.vx * w.y) / det);
+  const j = Math.round((b.ux * w.y - w.x * b.uy) / det);
+  return { x: i * b.ux + j * b.vx, y: i * b.uy + j * b.vy };
+}
 function snapToGrid(w) {
   if (!gridSnapEnabled()) return w;
+  if (gridIsoEnabled()) return snapToIso(w);
   const s = gridStepValue();
   return { x: Math.round(w.x / s) * s, y: Math.round(w.y / s) * s };
 }
@@ -3575,31 +3611,76 @@ function draw() {
 }
 
 function drawGrid() {
-  const step = gridStepValue();
-  const scale = viewScale();
-  // 画面に見えるワールド範囲
-  const x0 = S2Wx(0), y0 = S2Wy(0), x1 = S2Wx(viewW), y1 = S2Wy(viewH);
-  // ステップが細かすぎて潰れる場合は間引く
-  let gs = step;
-  while (gs * scale < 6) gs *= 5;
-
   const light = lightModeEnabled();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = light ? 'rgba(0,0,0,0.10)' : 'rgba(148,163,184,0.12)';
-  ctx.beginPath();
-  for (let x = Math.floor(x0 / gs) * gs; x <= x1; x += gs) {
-    const sx = W2Sx(x); ctx.moveTo(sx, 0); ctx.lineTo(sx, viewH);
-  }
-  for (let y = Math.floor(y0 / gs) * gs; y <= y1; y += gs) {
-    const sy = W2Sy(y); ctx.moveTo(0, sy); ctx.lineTo(viewW, sy);
-  }
-  ctx.stroke();
+  if (gridIsoEnabled()) {
+    drawIsoGrid(light);
+  } else {
+    const step = gridStepValue();
+    const scale = viewScale();
+    // 画面に見えるワールド範囲
+    const x0 = S2Wx(0), y0 = S2Wy(0), x1 = S2Wx(viewW), y1 = S2Wy(viewH);
+    // ステップが細かすぎて潰れる場合は間引く
+    let gs = step;
+    while (gs * scale < 6) gs *= 5;
 
-  // 原点軸
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = light ? 'rgba(0,0,0,0.10)' : 'rgba(148,163,184,0.12)';
+    ctx.beginPath();
+    for (let x = Math.floor(x0 / gs) * gs; x <= x1; x += gs) {
+      const sx = W2Sx(x); ctx.moveTo(sx, 0); ctx.lineTo(sx, viewH);
+    }
+    for (let y = Math.floor(y0 / gs) * gs; y <= y1; y += gs) {
+      const sy = W2Sy(y); ctx.moveTo(0, sy); ctx.lineTo(viewW, sy);
+    }
+    ctx.stroke();
+  }
+
+  // 原点軸(矩形/等角 共通)
   ctx.strokeStyle = light ? 'rgba(14,165,233,0.5)' : 'rgba(56,189,248,0.45)';
   ctx.beginPath();
   ctx.moveTo(W2Sx(0), 0); ctx.lineTo(W2Sx(0), viewH);
   ctx.moveTo(0, W2Sy(0)); ctx.lineTo(viewW, W2Sy(0));
+  ctx.stroke();
+}
+
+// 等角(アイソメ)格子: u方向とv方向の2系統の平行線で見取り図用の菱形グリッドを描く
+function drawIsoGrid(light) {
+  const b = isoBasis();
+  const scale = viewScale();
+  const det = b.ux * b.vy - b.vx * b.uy;
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-9) return;
+  // 画面4隅をワールド→格子指数(i,j)へ逆変換し描画範囲を求める
+  const inv = (x, y) => ({ i: (x * b.vy - b.vx * y) / det, j: (b.ux * y - x * b.uy) / det });
+  const corners = [inv(S2Wx(0), S2Wy(0)), inv(S2Wx(viewW), S2Wy(0)), inv(S2Wx(0), S2Wy(viewH)), inv(S2Wx(viewW), S2Wy(viewH))];
+  let iMin = Infinity, iMax = -Infinity, jMin = Infinity, jMax = -Infinity;
+  for (let k = 0; k < corners.length; k++) {
+    const c = corners[k];
+    if (!Number.isFinite(c.i) || !Number.isFinite(c.j)) return;
+    iMin = Math.min(iMin, c.i); iMax = Math.max(iMax, c.i);
+    jMin = Math.min(jMin, c.j); jMax = Math.max(jMax, c.j);
+  }
+  iMin = Math.floor(iMin) - 1; iMax = Math.ceil(iMax) + 1;
+  jMin = Math.floor(jMin) - 1; jMax = Math.ceil(jMax) + 1;
+  // 間引き(線間隔が細かすぎる時)と暴走防止の安全上限
+  let m = 1;
+  const perpPx = gridStepValue() * scale * 0.866; // 隣接平行線の画面間隔の目安
+  while (perpPx * m < 6) m *= 2;
+  const MAXLINES = 600;
+  while ((iMax - iMin) / m > MAXLINES || (jMax - jMin) / m > MAXLINES) m *= 2;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = light ? 'rgba(0,0,0,0.10)' : 'rgba(148,163,184,0.12)';
+  ctx.beginPath();
+  const startJ = Math.ceil(jMin / m) * m, startI = Math.ceil(iMin / m) * m;
+  for (let j = startJ; j <= jMax; j += m) {
+    const ax = iMin * b.ux + j * b.vx, ay = iMin * b.uy + j * b.vy;
+    const bx = iMax * b.ux + j * b.vx, by = iMax * b.uy + j * b.vy;
+    ctx.moveTo(W2Sx(ax), W2Sy(ay)); ctx.lineTo(W2Sx(bx), W2Sy(by));
+  }
+  for (let i = startI; i <= iMax; i += m) {
+    const ax = i * b.ux + jMin * b.vx, ay = i * b.uy + jMin * b.vy;
+    const bx = i * b.ux + jMax * b.vx, by = i * b.uy + jMax * b.vy;
+    ctx.moveTo(W2Sx(ax), W2Sy(ay)); ctx.lineTo(W2Sx(bx), W2Sy(by));
+  }
   ctx.stroke();
 }
 
@@ -3989,7 +4070,7 @@ function drawDraft() {
     showMeasure(x + s.w * scale / 2, y + s.h * scale / 2, label);
   } else if (s.type === 'circle') {
     ctx.arc(W2Sx(s.cx), W2Sy(s.cy), s.r * scale, 0, Math.PI * 2); ctx.stroke();
-    label = 'r ' + fmtLen(s.r) + ' mm';
+    label = '⌀' + fmtLen(s.r * 2) + ' (r' + fmtLen(s.r) + ') mm';
     showMeasure(W2Sx(s.cx), W2Sy(s.cy), label);
   } else if (s.type === 'ellipse') {
     ctx.ellipse(W2Sx(s.cx), W2Sy(s.cy), s.rx * scale, s.ry * scale, 0, 0, Math.PI * 2); ctx.stroke();
@@ -4022,6 +4103,19 @@ function drawPolyDraft() {
   // 始点近接ハイライト（閉じる予告）
   ctx.strokeStyle = 'rgba(56,189,248,.6)';
   ctx.beginPath(); ctx.arc(W2Sx(p[0].x), W2Sy(p[0].y), 9, 0, 7); ctx.stroke();
+  // 次セグメントのライブ寸法(長さ・角度): 直前頂点→現在のスナップ済みカーソル
+  const last = p[p.length - 1];
+  let cw = snapMarker;
+  if (!cw && hoverScreen) cw = { x: S2Wx(hoverScreen.x), y: S2Wy(hoverScreen.y) };
+  if (cw && last && (cw.x !== last.x || cw.y !== last.y)) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(125,211,252,.7)'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]); ctx.lineDashOffset = 0;
+    ctx.beginPath(); ctx.moveTo(W2Sx(last.x), W2Sy(last.y)); ctx.lineTo(W2Sx(cw.x), W2Sy(cw.y)); ctx.stroke();
+    ctx.restore();
+    const deg = (-Math.atan2(cw.y - last.y, cw.x - last.x) * 180 / Math.PI + 360) % 360;
+    const label = fmtLen(Math.hypot(cw.x - last.x, cw.y - last.y)) + ' mm ∠' + deg.toFixed(0) + '°';
+    showMeasure((W2Sx(last.x) + W2Sx(cw.x)) / 2, (W2Sy(last.y) + W2Sy(cw.y)) / 2, label);
+  }
 }
 
 function drawMarquee() {
@@ -5159,9 +5253,14 @@ function onToolMove(p) {
   const w = resolvePoint(p.x, p.y);
   if (draft.type === 'line' || draft.type === 'dim') {
     let ex = w.x, ey = w.y;
-    if (shiftHeld) { // 0/45/90度に拘束
+    if (shiftHeld) { // 等角ON時は30/90/150…の等角軸へ、通常は0/45/90度に拘束
       const dx = ex - draft.x1, dy = ey - draft.y1, len = Math.hypot(dx, dy);
-      const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+      let a;
+      if (gridIsoEnabled()) {
+        a = Math.round((Math.atan2(dy, dx) - ISO_ANG) / (Math.PI / 3)) * (Math.PI / 3) + ISO_ANG;
+      } else {
+        a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+      }
       ex = draft.x1 + len * Math.cos(a); ey = draft.y1 + len * Math.sin(a);
     }
     draft.x2 = ex; draft.y2 = ey;
@@ -5782,6 +5881,8 @@ function setGridPreference(key, value) {
 safeSetHandler(cGrid, 'onchange', e => { setGridPreference('show', controlChecked(e, cGrid, gridShowEnabled())); draw(); commitPrefsHistory(); });
 safeSetHandler(cSnap, 'onchange', e => { setGridPreference('snap', controlChecked(e, cSnap, gridSnapEnabled())); commitPrefsHistory(); });
 safeSetHandler(cOsnap, 'onchange', e => { setGridPreference('osnap', controlChecked(e, cOsnap, gridOsnapEnabled())); commitPrefsHistory(); });
+const cIso = safeGetElementById('cIso');
+safeSetHandler(cIso, 'onchange', e => { setGridPreference('iso', controlChecked(e, cIso, gridIsoEnabled())); draw(); commitPrefsHistory(); });
 safeSetHandler(cLight, 'onchange', e => {
   const ui = sanitizedUiFromSource(ensureStateObject('ui', defaultUi), defaultUi());
   ui.light = controlChecked(e, cLight, lightModeEnabled());
@@ -8086,9 +8187,10 @@ function dxfPolylineVertexPoints(vertices, closed = false) {
   const pts = [{ x: vertices[0].x, y: -vertices[0].y }];
   const addSegment = (a, b, includeEnd) => {
     const segment = dxfBulgeSegmentPoints(a, b, a.bulge, MAX_POLYLINE_POINTS - pts.length, includeEnd);
-    for (const p of segment) {
-      if (pts.length >= MAX_POLYLINE_POINTS) break;
-      pts.push(p);
+    const len = safeArrayLength(segment, 0);
+    for (let i = 0; i < len && pts.length < MAX_POLYLINE_POINTS; i++) {
+      const p = safeProp(segment, i, null);
+      if (p) pts.push(p);
     }
   };
   for (let i = 0; i + 1 < vertices.length && pts.length < MAX_POLYLINE_POINTS; i++) addSegment(vertices[i], vertices[i + 1], true);
@@ -8114,10 +8216,14 @@ function dxfPolyfaceShapes(poly) {
   const faces = poly && Array.isArray(poly.faces) ? poly.faces : [];
   const base = dxfPolylineStyle(poly);
   const out = [];
-  for (const face of faces) {
-    if (out.length >= MAX_SHAPES) break;
+  const faceLen = safeArrayLength(faces, 0);
+  for (let faceIndex = 0; faceIndex < faceLen && out.length < MAX_SHAPES; faceIndex++) {
+    const face = safeProp(faces, faceIndex, null);
+    if (!Array.isArray(face)) continue;
     const refs = [];
-    for (const raw of face) {
+    const refLen = safeArrayLength(face, 0);
+    for (let refIndex = 0; refIndex < refLen; refIndex++) {
+      const raw = safeProp(face, refIndex, 0);
       const idx = Math.abs(raw);
       if (!idx) break;
       const v = verts[idx - 1];
@@ -8401,6 +8507,13 @@ function dxfPushSamplePoint(out, p) {
   out.push(p);
   return true;
 }
+function dxfPushSamplePointList(out, list, mapPoint = null) {
+  const len = safeArrayLength(list, 0);
+  for (let i = 0; i < len && out.length < MAX_POLYLINE_POINTS; i++) {
+    const p = safeProp(list, i, null);
+    dxfPushSamplePoint(out, typeof mapPoint === 'function' ? mapPoint(p, i) : p);
+  }
+}
 function dxfOpenUniformKnots(count, degree) {
   const knots = [];
   const spanCount = Math.max(1, count - degree);
@@ -8634,10 +8747,7 @@ function dxfHatchPolylineBoundary(pairs, i, out) {
     if (Number.isFinite(x) && Number.isFinite(y)) vertices.push({ x, y, bulge });
   }
   if (vertices.length >= 2) {
-    for (const p of dxfPolylineVertexPoints(vertices, closed)) {
-      if (out.length >= MAX_POLYLINE_POINTS) break;
-      dxfPushSamplePoint(out, p);
-    }
+    dxfPushSamplePointList(out, dxfPolylineVertexPoints(vertices, closed));
   }
   return i;
 }
@@ -8677,24 +8787,15 @@ function dxfHatchReadEdge(pairs, i, out) {
   } else if (edgeType === 2) {
     const v = readNums(setFromList([10, 20, 40, 50, 51, 73]));
     const pts = dxfHatchArcEdgePoints(v[10], v[20], v[40], v[50], v[51], parseInt(v[73] || 0, 10) !== 0, out.length === 0);
-    for (const p of pts) {
-      if (out.length >= MAX_POLYLINE_POINTS) break;
-      dxfPushSamplePoint(out, p);
-    }
+    dxfPushSamplePointList(out, pts);
   } else if (edgeType === 3) {
     const v = readNums(setFromList([10, 20, 11, 21, 40, 50, 51, 73]));
     const pts = dxfHatchEllipseEdgePoints(v[10], v[20], v[11], v[21], v[40], v[50], v[51], parseInt(v[73] || 0, 10) !== 0, out.length === 0);
-    for (const p of pts) {
-      if (out.length >= MAX_POLYLINE_POINTS) break;
-      dxfPushSamplePoint(out, p);
-    }
+    dxfPushSamplePointList(out, pts);
   } else if (edgeType === 4) {
     const v = readAllNums(setFromList([94, 73, 74, 95, 96, 40, 10, 20, 42, 97, 11, 21, 12, 22, 13, 23]));
     const pts = dxfHatchSplineEdgePoints(v, out.length === 0);
-    for (const p of pts) {
-      if (out.length >= MAX_POLYLINE_POINTS) break;
-      dxfPushSamplePoint(out, p);
-    }
+    dxfPushSamplePointList(out, pts);
   } else {
     while (i < pairs.length && pairs[i].code !== 72 && pairs[i].code !== 92) i++;
   }
@@ -8739,7 +8840,8 @@ function dxfFaceCornerPoints(c, g) {
   }
   if (!corners[3] && corners[2]) corners[3] = { ...corners[2] };
   const pts = [];
-  for (const p of corners) {
+  for (let i = 0; i < corners.length; i++) {
+    const p = corners[i];
     if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
     const last = pts[pts.length - 1];
     if (!last || Math.abs(last.x - p.x) > 1e-9 || Math.abs(last.y - p.y) > 1e-9) pts.push(p);
@@ -8865,7 +8967,7 @@ function dxfLeaderPoints(c) {
     if (smooth.length >= 2) return smooth;
   }
   const out = [];
-  for (const p of raw) dxfPushSamplePoint(out, { x: p.x, y: -p.y });
+  dxfPushSamplePointList(out, raw, p => p ? { x: p.x, y: -p.y } : null);
   return out;
 }
 function dxfLeaderArrowShapes(points, style) {
@@ -9107,7 +9209,7 @@ function dxfMlineShape(c, style) {
   const points = [];
   const raw = dxfPointSeries(c, 11, 21);
   if (raw.length) {
-    for (const p of raw) dxfPushSamplePoint(points, { x: p.x, y: -p.y });
+    dxfPushSamplePointList(points, raw, p => p ? { x: p.x, y: -p.y } : null);
   } else {
     const start = dxfPoint(c, 10, 20);
     if (start) dxfPushSamplePoint(points, start);
@@ -9175,12 +9277,10 @@ function dxfWipeoutShape(c, style) {
   const clip = dxfWipeoutClipPoints(c);
   if (!origin || !u || !v || Math.hypot(u.x, u.y) <= 1e-12 || Math.hypot(v.x, v.y) <= 1e-12 || clip.length < 3) return null;
   const points = [];
-  for (const q of clip) {
-    dxfPushSamplePoint(points, {
+  dxfPushSamplePointList(points, clip, q => q ? {
       x: origin.x + u.x * q.x + v.x * q.y,
       y: origin.y + u.y * q.x + v.y * q.y,
-    });
-  }
+    } : null);
   if (points.length < 3) return null;
   return {
     type: 'polyline',
@@ -9206,12 +9306,10 @@ function dxfImageReferenceShapes(c, style, imageDefs = null) {
   const clip = dxfWipeoutClipPoints(c);
   if (!origin || !u || !v || Math.hypot(u.x, u.y) <= 1e-12 || Math.hypot(v.x, v.y) <= 1e-12 || clip.length < 3) return null;
   const points = [];
-  for (const q of clip) {
-    dxfPushSamplePoint(points, {
+  dxfPushSamplePointList(points, clip, q => q ? {
       x: origin.x + u.x * q.x + v.x * q.y,
       y: origin.y + u.y * q.x + v.y * q.y,
-    });
-  }
+    } : null);
   if (points.length < 3) return null;
   const outline = { type: 'polyline', points, closed: true, ...style, fill: null };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -9278,10 +9376,11 @@ function dxfUnderlayReferenceShapes(type, c, style, underlayDefs = null) {
   const rot = -scaleNumber(50, 0) * Math.PI / 180;
   const cs = Math.cos(rot), sn = Math.sin(rot);
   const points = [];
-  for (const q of dxfUnderlayClipPoints(c)) {
+  dxfPushSamplePointList(points, dxfUnderlayClipPoints(c), q => {
+    if (!q) return null;
     const lx = q.x * sx, ly = -q.y * sy;
-    dxfPushSamplePoint(points, { x: origin.x + lx * cs - ly * sn, y: origin.y + lx * sn + ly * cs });
-  }
+    return { x: origin.x + lx * cs - ly * sn, y: origin.y + lx * sn + ly * cs };
+  });
   if (points.length < 3) return null;
   const outline = { type: 'polyline', points, closed: true, ...style, fill: null };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -9409,7 +9508,7 @@ function dxfSectionNumberText(value) {
 }
 function dxfSectionPoints(c, xCode, yCode) {
   const points = [];
-  for (const p of dxfPointSeries(c, xCode, yCode)) dxfPushSamplePoint(points, { x: p.x, y: -p.y });
+  dxfPushSamplePointList(points, dxfPointSeries(c, xCode, yCode), p => p ? { x: p.x, y: -p.y } : null);
   return points;
 }
 function dxfSectionLabelText(c) {
@@ -9850,8 +9949,21 @@ function dxfBlockKey(name) {
     function dxfShapeItems(sh) {
       return Array.isArray(sh) ? safeFilterItems(sh, value => !!value) : (sh ? [sh] : []);
     }
+function dxfForEachArrayItem(list, callback, max = MAX_SHAPES) {
+  if (!list || typeof callback !== 'function') return;
+  const rawLen = safeArrayLength(list, 0);
+  const limit = Math.min(rawLen, Number.isFinite(max) ? Math.max(0, Math.floor(max)) : rawLen);
+  for (let i = 0; i < limit; i++) {
+    const item = safeProp(list, i, null);
+    if (item == null) continue;
+    if (callback(item, i) === false) break;
+  }
+}
+function dxfForEachShapeItem(sh, callback) {
+  dxfForEachArrayItem(dxfShapeItems(sh), callback, MAX_SHAPES);
+}
 function dxfAssignLayerName(sh, layerName) {
-  for (const item of dxfShapeItems(sh)) item._layerName = layerName;
+  dxfForEachShapeItem(sh, item => { item._layerName = layerName; });
   return sh;
 }
 function dxfEntityTypes() {
@@ -10125,23 +10237,23 @@ function dxfTransformShape(s, xf) {
       const matrix = parentXf && parentXf.matrix ? dxfMatrixMultiply(parentXf.matrix, localMatrix) : localMatrix;
       const info = dxfMatrixScaleRot(matrix);
       const xf = { base: block.base, insert, sx: info.sx, sy: info.sy, rot: info.rot, layerName, stroke, dash, strokeWidth, matrix };
-      for (const src of block.shapes) {
-        if (out.length >= MAX_SHAPES) break;
+      dxfForEachArrayItem(block.shapes, src => {
+        if (out.length >= MAX_SHAPES) return false;
         if (src.type === '_dxfAttdef') {
           const tag = dxfAttrTagFromShape(src.shape);
-          if (skipAttdefTags === true || (skipAttdefTags && tag && skipAttdefTags.has(tag))) continue;
+          if (skipAttdefTags === true || (skipAttdefTags && tag && skipAttdefTags.has(tag))) return;
           const sh = dxfTransformShape(src.shape, xf);
           if (sh) out.push(sh);
         } else if (src.type === '_dxfInsert') {
-          for (const sh of dxfExpandInsert(src.c, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, xf, stack.concat(key))) {
-            if (out.length >= MAX_SHAPES) break;
+          dxfForEachArrayItem(dxfExpandInsert(src.c, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, xf, stack.concat(key)), sh => {
+            if (out.length >= MAX_SHAPES) return false;
             out.push(sh);
-          }
+          });
         } else {
           const sh = dxfTransformShape(src, xf);
           if (sh) out.push(sh);
         }
-      }
+      });
     }
   }
   return out;
@@ -10152,13 +10264,13 @@ function dxfBlockDefinitions(ls, layerColors, layerDashes, ltypeDashes, layerStr
   let section = '', pendingSection = false, cur = null, curType = null, poly = null, block = null;
   const addBlockShape = sh => {
     if (!block || !sh) return;
-    for (const item of dxfShapeItems(sh)) {
-      if (block.shapes.length >= MAX_SHAPES) break;
+    dxfForEachShapeItem(sh, item => {
+      if (block.shapes.length >= MAX_SHAPES) return false;
       block.shapes.push(item);
-    }
+    });
   };
   const finishPoly = () => {
-    for (const sh of dxfPolylineShapes(poly)) addBlockShape(sh);
+    dxfForEachArrayItem(dxfPolylineShapes(poly), sh => { addBlockShape(sh); });
     poly = null;
   };
   const flush = () => {
@@ -10225,18 +10337,18 @@ function parseDXF(text) {
     const includeImportEntity = c => dxfEntityVisible(c) && (!preferModelSpace || !dxfEntityPaperSpace(c));
       let section = '', pendingSection = false, cur = null, curType = null, poly = null, pendingInsert = null, pendingAttrs = [], skipPendingInsertAttrs = false;
   const addParsedShape = sh => {
-    for (const item of dxfShapeItems(sh)) {
-      if (shapes.length >= MAX_SHAPES) break;
+    dxfForEachShapeItem(sh, item => {
+      if (shapes.length >= MAX_SHAPES) return false;
       shapes.push(item);
-    }
+    });
     };
       const flushPendingInsert = () => {
         if (!pendingInsert) return;
       const tags = setFromList(safeMapFilterItems(pendingAttrs, dxfAttrTagFromShape));
       const options = tags.size ? { skipAttdefTags: tags } : null;
-      for (const sh of dxfExpandInsert(pendingInsert, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, null, [], options)) addParsedShape(sh);
+      dxfForEachArrayItem(dxfExpandInsert(pendingInsert, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, null, [], options), sh => { addParsedShape(sh); });
     const xf = dxfInsertStyleContext(pendingInsert, layerColors, layerDashes, ltypeDashes, layerStrokeWidths);
-    for (const attr of pendingAttrs) addParsedShape(dxfApplyShapeStyle(attr, xf));
+    dxfForEachArrayItem(pendingAttrs, attr => { addParsedShape(dxfApplyShapeStyle(attr, xf)); });
       pendingInsert = null;
       pendingAttrs = [];
     };
@@ -10246,7 +10358,7 @@ function parseDXF(text) {
       pendingInsert = null;
     };
   const finishPoly = () => {
-    for (const sh of dxfPolylineShapes(poly)) addParsedShape(sh);
+    dxfForEachArrayItem(dxfPolylineShapes(poly), sh => { addParsedShape(sh); });
     poly = null;
   };
   const flush = () => {
@@ -10268,7 +10380,7 @@ function parseDXF(text) {
           pendingInsert = cur;
           pendingAttrs = [];
         } else {
-        for (const sh of dxfExpandInsert(cur, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths)) addParsedShape(sh);
+        dxfForEachArrayItem(dxfExpandInsert(cur, blocks, layerColors, layerDashes, ltypeDashes, layerStrokeWidths), sh => { addParsedShape(sh); });
         }
       } else if (curType === 'ATTRIB') {
         const sh = includeImportEntity(cur) ? dxfToShape(curType, cur, layerColors, layerDashes, ltypeDashes, layerStrokeWidths, imageDefs, underlayDefs) : null;
@@ -10417,13 +10529,15 @@ function svgPathPolys(d) {
   finish();
   return out;
 }
-function* svgDrawableElements(root) {
+function svgDrawableElements(root) {
   const elements = safeTreeWalkerElements(root, MAX_SHAPES * 8);
+  const out = [];
   const elementLen = safeArrayLength(elements, 0);
-  for (let elementIndex = 0; elementIndex < elementLen; elementIndex++) {
+  for (let elementIndex = 0; elementIndex < elementLen && out.length < MAX_SHAPES; elementIndex++) {
     const el = safeProp(elements, elementIndex, null);
-    if (SVG_DRAWABLE_TAGS.has(safeTagName(el)) && !svgInNonRenderingContainer(el)) yield el;
+    if (SVG_DRAWABLE_TAGS.has(safeTagName(el)) && !svgInNonRenderingContainer(el)) out[out.length] = el;
   }
+  return out;
 }
 function svgInNonRenderingContainer(el) {
   for (let n = safeParentNode(el); n && n.getAttribute; n = safeParentNode(n)) {
@@ -10595,7 +10709,10 @@ function svgExpandUses(root) {
       SVG_USE_EXPANSION_MAX + 1
     );
     if (!uses.length) break;
-    for (const use of uses) {
+    const useLen = safeArrayLength(uses, 0);
+    for (let useIndex = 0; useIndex < useLen && expandedUses < SVG_USE_EXPANSION_MAX; useIndex++) {
+      const use = safeProp(uses, useIndex, null);
+      if (!use) continue;
       expanded.add(use);
       const target = ids.get(svgUseHrefId(use));
       const parent = safeParentNode(use);
@@ -10616,7 +10733,6 @@ function svgExpandUses(root) {
       if (!clone || !safeAppend(wrapper, clone) || !safeInsertBefore(parent, wrapper, use)) continue;
       expandedUses++;
       expandedNodes += cost;
-      if (expandedUses >= SVG_USE_EXPANSION_MAX) break;
     }
   }
 }
@@ -10749,8 +10865,11 @@ function parseSVGCore(text) {
   };
   const cssRules = [];
   let cssText = '', styleRules = 0;
-  for (const styleEl of safeElementsByTagName(root, 'style', SVG_STYLE_RULE_MAX + 1)) {
+  const styleElements = safeElementsByTagName(root, 'style', SVG_STYLE_RULE_MAX + 1);
+  const styleElementLen = safeArrayLength(styleElements, 0);
+  for (let styleElementIndex = 0; styleElementIndex < styleElementLen; styleElementIndex++) {
     if (cssText.length >= SVG_STYLE_TEXT_MAX) break;
+    const styleEl = safeProp(styleElements, styleElementIndex, null);
     cssText += '\n' + safeString(safeProp(styleEl, 'textContent', '') || '', '');
   }
   cssText = cssText.slice(0, SVG_STYLE_TEXT_MAX).replace(/\/\*[\s\S]*?\*\//g, '');
@@ -10844,7 +10963,10 @@ function parseSVGCore(text) {
     const target = name.toLowerCase();
     let selected = null;
     let specificity = -1;
-    for (const rule of cssRules) {
+    const ruleLen = safeArrayLength(cssRules, 0);
+    for (let ruleIndex = 0; ruleIndex < ruleLen; ruleIndex++) {
+      const rule = safeProp(cssRules, ruleIndex, null);
+      if (!rule) continue;
       const sel = rule.selector;
       const match = selectorMatches(sel, el);
       const decl = rule.decls[target];
@@ -10980,7 +11102,10 @@ function parseSVGCore(text) {
       alphaSum += alpha * weight;
       for (let i = 0; i < 3; i++) rgbSum[i] += rgb[i] * alpha * weight;
     };
-    for (const stop of stops) {
+    const stopLen = safeArrayLength(stops, 0);
+    for (let stopIndex = 0; stopIndex < stopLen; stopIndex++) {
+      const stop = safeProp(stops, stopIndex, null);
+      if (!stop) continue;
       const off = Math.max(pos, stop.offset);
       if (!prev) {
         add(stop.rgb, stop.alpha, off);
@@ -11004,7 +11129,9 @@ function parseSVGCore(text) {
   const svgAveragePaintColors = samples => {
     let totalWeight = 0, alphaWeight = 0;
     const rgbSum = [0, 0, 0];
-    for (const sample of samples) {
+    const sampleLen = safeArrayLength(samples, 0);
+    for (let sampleIndex = 0; sampleIndex < sampleLen; sampleIndex++) {
+      const sample = safeProp(samples, sampleIndex, null);
       const weight = clampNumber(sample && sample.weight, 0, 1000, 1);
       if (weight <= 0) continue;
       const safe = safeColor(sample && sample.color, null);
@@ -11029,8 +11156,10 @@ function parseSVGCore(text) {
     const walk = node => {
       if (!node || samples.length >= SVG_PATTERN_COLOR_MAX) return;
       const kids = safeChildElements(node);
-      for (const child of kids) {
-        if (samples.length >= SVG_PATTERN_COLOR_MAX) break;
+      const kidLen = safeArrayLength(kids, 0);
+      for (let kidIndex = 0; kidIndex < kidLen && samples.length < SVG_PATTERN_COLOR_MAX; kidIndex++) {
+        const child = safeProp(kids, kidIndex, null);
+        if (!child) continue;
         const tag = safeTagName(child);
         if (!tag || !svgVisible(child)) continue;
         if (tag === 'script' || tag === 'style' || tag === 'defs' || tag === 'symbol' || tag === 'marker' || tag === 'mask' || tag === 'clippath') continue;
@@ -11224,8 +11353,11 @@ function parseSVGCore(text) {
     return info.visible ? info.color : null;
   };
   const parsePoints = str => svgPointList(str);
-  for (const el of svgDrawableElements(root)) {
-    if (shapes.length >= MAX_SHAPES) break;
+  const drawableElements = svgDrawableElements(root);
+  const drawableLen = safeArrayLength(drawableElements, 0);
+  for (let drawableIndex = 0; drawableIndex < drawableLen && shapes.length < MAX_SHAPES; drawableIndex++) {
+    const el = safeProp(drawableElements, drawableIndex, null);
+    if (!el) continue;
     if (!svgVisible(el)) continue;
     const tag = safeTagName(el);
     const tr = svgTransformOf(el);
@@ -11331,8 +11463,11 @@ function parseSVGCore(text) {
       if (src && w > 0 && h > 0 && imageOpacity > 0) shapes.push({ type: 'image', ...tquadBox(x, y, w, h), src, opacity: imageOpacity });
     }
     else if (tag === 'path') {
-      for (const seg of svgPathPolys(safeGetAttr(el, 'd', null))) {
-        if (shapes.length >= MAX_SHAPES) break;
+      const pathSegments = svgPathPolys(safeGetAttr(el, 'd', null));
+      const pathSegmentLen = safeArrayLength(pathSegments, 0);
+      for (let pathSegmentIndex = 0; pathSegmentIndex < pathSegmentLen && shapes.length < MAX_SHAPES; pathSegmentIndex++) {
+        const seg = safeProp(pathSegments, pathSegmentIndex, null);
+        if (!seg) continue;
         if (seg.pts.length >= 2 && (seg.closed ? (explicitStroke || fill) : explicitStroke)) shapes.push({ ...base, ...(explicitStroke ? { stroke: explicitStroke } : {}), type: 'polyline', points: tpts(seg.pts), closed: seg.closed, fill: seg.closed ? fill : null });
       }
     }
@@ -11686,7 +11821,11 @@ async function buildPDFBlob(options = {}) {
   push(enc(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`));
 
   let total = new Uint8Array(len), pos = 0;
-  for (const c of chunks) { total.set(c, pos); pos += c.length; }
+  for (let i = 0; i < chunks.length; i++) {
+    const c = chunks[i];
+    total.set(c, pos);
+    pos += c.length;
+  }
   const blob = safeCreateBlob([total], 'application/pdf');
   if (!blob) throw new Error('PDF_BLOB_CREATE_FAILED');
   return blob;
@@ -11982,6 +12121,7 @@ function syncPrefsUI() {
   safeSetCheckedById('cGrid', gridShowEnabled());
   safeSetCheckedById('cSnap', gridSnapEnabled());
   safeSetCheckedById('cOsnap', gridOsnapEnabled());
+  safeSetCheckedById('cIso', gridIsoEnabled());
   safeSetCheckedById('cLight', lightModeEnabled());
   safeSetValueById('gPrec', String(Number.isInteger(safeProp(ui, 'precision', 1)) ? safeProp(ui, 'precision', 1) : 1));
   const gStep = safeGetElementById('gStep');
