@@ -162,6 +162,11 @@
   #help ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
   #help b { color: #fff; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 12px; }
   #helpClose, #arrayClose { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 8px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
+  #netDlg { position: absolute; inset: 0; background: rgba(2,6,23,.7); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+  #netDlg input, #netDlg select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  #netDlg .helpcard { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; max-width: 320px; width: 100%; max-height: 86%; overflow-y: auto; padding: 18px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #netDlg h2 { margin: 0 0 10px; font-size: 17px; color: var(--accent); }
+  #netClose { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 8px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
   .toast {
     position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(15,23,42,.95); border: 1px solid var(--accent); color: var(--text);
@@ -241,6 +246,7 @@
       <button class="tbtn" id="btnLoad" title="JSON読込">📂 読込</button>
       <button class="tbtn" id="btnImport" title="DXF / SVG を取り込み">📥 取込</button>
       <button class="tbtn" id="btnImg" title="画像を配置(トレース用)">🖼 画像</button>
+      <button class="tbtn" id="btnNet" title="展開図を生成(直方体・円柱・円錐)">📦 展開図</button>
       <span class="group" style="position:relative">
         <button class="tbtn" id="btnExport" title="書き出し" aria-haspopup="menu" aria-expanded="false" aria-controls="exportMenu">⬇ 書出 ▾</button>
         <div id="exportMenu" class="menu" style="display:none" role="menu" aria-label="書き出し形式" aria-hidden="true">
@@ -402,6 +408,25 @@
         <label style="display:flex;justify-content:space-between;margin:6px 0">行間隔 <input type="number" id="arDy" value="40" style="width:80px"> mm</label>
         <label style="display:flex;justify-content:space-between;margin:6px 0">列間隔 <input type="number" id="arDx" value="40" style="width:80px"> mm</label>
         <button id="arrayOk" class="tbtn" style="width:100%;margin-top:8px;background:var(--accent2);color:#001;border:none;height:38px;border-radius:8px;cursor:pointer">作成</button>
+      </div>
+    </div>
+
+    <!-- 展開図 -->
+    <div id="netDlg" style="display:none" role="dialog" aria-modal="true" aria-labelledby="netTitle" aria-hidden="true" tabindex="-1">
+      <div class="helpcard">
+        <button id="netClose" title="閉じる">✕</button>
+        <h2 id="netTitle">📦 展開図を作成</h2>
+        <label style="display:flex;justify-content:space-between;margin:6px 0">種類 <select id="netType" style="width:140px">
+          <option value="box">直方体</option>
+          <option value="cylinder">円柱</option>
+          <option value="cone">円錐</option>
+        </select></label>
+        <label class="netRow" id="netRowA" style="display:flex;justify-content:space-between;margin:6px 0"><span id="netLblA">幅 W</span> <input type="number" id="netA" min="1" max="1000" value="60" style="width:90px"> mm</label>
+        <label class="netRow" id="netRowB" style="display:flex;justify-content:space-between;margin:6px 0"><span id="netLblB">奥行 D</span> <input type="number" id="netB" min="1" max="1000" value="40" style="width:90px"> mm</label>
+        <label class="netRow" id="netRowC" style="display:flex;justify-content:space-between;margin:6px 0"><span id="netLblC">高さ H</span> <input type="number" id="netC" min="1" max="1000" value="50" style="width:90px"> mm</label>
+        <label class="chk" style="display:flex;align-items:center;gap:6px;margin:8px 0"><input type="checkbox" id="netDimChk" checked> 寸法を入れる</label>
+        <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">折り線は破線で出力されます</div>
+        <button id="netOk" class="tbtn" style="width:100%;margin-top:4px;background:var(--accent2);color:#001;border:none;height:38px;border-radius:8px;cursor:pointer">作成</button>
       </div>
     </div>
 
@@ -7026,6 +7051,140 @@ safeAddEventListener(arrayDlg, 'keydown', e => {
   stopKeyPropagation(e);
   trapFocus(arrayDlg, e);
   if (keyEventKey(e) === 'Escape') { preventKeyDefault(e); closeArrayDlg(); }
+});
+
+// ===== 展開図(ネット)生成: 直方体・円柱・円錐 =====
+const netDlg = safeGetElementById('netDlg');
+const NET_DIM_MAX = 1000;
+function closeNetDlg() { closeDialog(netDlg); }
+function netSyncFields() {
+  const type = safeGetValueById('netType', 'box');
+  const rowB = safeGetElementById('netRowB');
+  if (type === 'box') {
+    safeSetText(safeGetElementById('netLblA'), '幅 W');
+    safeSetText(safeGetElementById('netLblB'), '奥行 D');
+    safeSetText(safeGetElementById('netLblC'), '高さ H');
+    safeSetDisplay(rowB, 'flex');
+  } else if (type === 'cylinder') {
+    safeSetText(safeGetElementById('netLblA'), '直径 ⌀');
+    safeSetText(safeGetElementById('netLblC'), '高さ H');
+    safeSetDisplay(rowB, 'none');
+  } else { // cone
+    safeSetText(safeGetElementById('netLblA'), '底面半径 r');
+    safeSetText(safeGetElementById('netLblC'), '高さ H');
+    safeSetDisplay(rowB, 'none');
+  }
+}
+function openNetDlg(opener) { netSyncFields(); openDialog(netDlg, opener, safeGetElementById('netType')); }
+function netInput(id, fallback) {
+  const v = clampNumber(safeGetValueById(id, String(fallback)), 1, NET_DIM_MAX, fallback);
+  safeSetValueById(id, String(v));
+  return v;
+}
+function runNet() {
+  const type = safeGetValueById('netType', 'box');
+  const chk = safeGetElementById('netDimChk');
+  let withDim = true; try { withDim = !!(chk && chk.checked); } catch (e) {}
+  const layer = activeLayerForCreate();
+  if (!layer) { closeNetDlg(); return; }
+  const color = safeProp(normalizeStyle(), 'stroke', '#000000');
+  const lines = [];   // {x1,y1,x2,y2,fold}
+  const circles = []; // {cx,cy,r}
+  const polys = [];   // {points,closed}
+  const dims = [];    // {x1,y1,x2,y2}
+  const faces = [];   // [[{x,y}...]] 共有辺を折り線(破線)、外周を実線に振り分け
+
+  if (type === 'box') {
+    const W = netInput('netA', 60), D = netInput('netB', 40), H = netInput('netC', 50);
+    const rect = (x, y, w, h) => [{ x: x, y: y }, { x: x + w, y: y }, { x: x + w, y: y + h }, { x: x, y: y + h }];
+    faces.push(rect(0, 0, W, H));     // 前
+    faces.push(rect(0, -D, W, D));    // 上
+    faces.push(rect(0, H, W, D));     // 下
+    faces.push(rect(-D, 0, D, H));    // 左
+    faces.push(rect(W, 0, D, H));     // 右
+    faces.push(rect(W + D, 0, W, H)); // 後(右の隣)
+    if (withDim) {
+      dims.push({ x1: 0, y1: -D - 10, x2: W, y2: -D - 10 }); // W
+      dims.push({ x1: -D - 10, y1: 0, x2: -D - 10, y2: H }); // H
+      dims.push({ x1: W, y1: -10, x2: W + D, y2: -10 });     // D
+    }
+  } else if (type === 'cylinder') {
+    const D = netInput('netA', 60), H = netInput('netC', 50);
+    const r = D / 2, W = Math.PI * D;
+    lines.push({ x1: 0, y1: 0, x2: 0, y2: H, fold: false }); // 左
+    lines.push({ x1: W, y1: 0, x2: W, y2: H, fold: false }); // 右
+    lines.push({ x1: 0, y1: 0, x2: W, y2: 0, fold: true });  // 上(折り)
+    lines.push({ x1: 0, y1: H, x2: W, y2: H, fold: true });  // 下(折り)
+    circles.push({ cx: W / 2, cy: -r, r: r });               // 上面
+    circles.push({ cx: W / 2, cy: H + r, r: r });            // 下面
+    if (withDim) {
+      dims.push({ x1: 0, y1: H + 10, x2: W, y2: H + 10 });   // 周長 πD
+      dims.push({ x1: W + 10, y1: 0, x2: W + 10, y2: H });   // H
+    }
+  } else { // cone
+    const R = netInput('netA', 40), H = netInput('netC', 50);
+    const l = Math.hypot(R, H);
+    const th = l > 0 ? (2 * Math.PI * R) / l : 0;
+    const N = Math.max(12, Math.round(th / (Math.PI / 36)));
+    const arc = [];
+    for (let k = 0; k <= N; k++) { const a = -th / 2 + th * k / N; arc.push({ x: l * Math.sin(a), y: l * Math.cos(a) }); }
+    lines.push({ x1: 0, y1: 0, x2: arc[0].x, y2: arc[0].y, fold: false });     // 母線1
+    lines.push({ x1: 0, y1: 0, x2: arc[N].x, y2: arc[N].y, fold: false });     // 母線2
+    polys.push({ points: arc, closed: false });                                // 扇形の弧
+    circles.push({ cx: 0, cy: l + R, r: R });                                  // 底面円
+    if (withDim) dims.push({ x1: -R, y1: l + R, x2: R, y2: l + R });           // 底面直径
+  }
+
+  // 多面体の面 → 辺の重複数で実線/折り線を判定
+  if (faces.length) {
+    const round = v => Math.round(v * 1000) / 1000;
+    const ekey = (a, b) => { const ka = round(a.x) + ',' + round(a.y), kb = round(b.x) + ',' + round(b.y); return ka < kb ? ka + '|' + kb : kb + '|' + ka; };
+    const emap = new Map();
+    for (let fi = 0; fi < faces.length; fi++) {
+      const f = faces[fi];
+      for (let i = 0; i < f.length; i++) {
+        const a = f[i], b = f[(i + 1) % f.length], k = ekey(a, b), ex = emap.get(k);
+        if (ex) ex.count++; else emap.set(k, { a: a, b: b, count: 1 });
+      }
+    }
+    emap.forEach(e => { lines.push({ x1: e.a.x, y1: e.a.y, x2: e.b.x, y2: e.b.y, fold: e.count >= 2 }); });
+  }
+
+  // 図形全体のbboxを求めビュー中央へ寄せる
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const acc = (x, y) => { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; };
+  for (let i = 0; i < lines.length; i++) { acc(lines[i].x1, lines[i].y1); acc(lines[i].x2, lines[i].y2); }
+  for (let i = 0; i < circles.length; i++) { acc(circles[i].cx - circles[i].r, circles[i].cy - circles[i].r); acc(circles[i].cx + circles[i].r, circles[i].cy + circles[i].r); }
+  for (let i = 0; i < polys.length; i++) { const p = polys[i].points; for (let j = 0; j < p.length; j++) acc(p[j].x, p[j].y); }
+  if (!Number.isFinite(minX)) { closeNetDlg(); return; }
+  const dx = S2Wx(viewW / 2) - (minX + maxX) / 2, dy = S2Wy(viewH / 2) - (minY + maxY) / 2;
+
+  const out = [];
+  for (let i = 0; i < lines.length; i++) { const L = lines[i]; out.push({ id: uid(), type: 'line', x1: L.x1 + dx, y1: L.y1 + dy, x2: L.x2 + dx, y2: L.y2 + dy, stroke: color, strokeWidth: 1.5, fill: null, dash: L.fold ? 'dashed' : 'solid', layer: layer }); }
+  for (let i = 0; i < circles.length; i++) { const c = circles[i]; out.push({ id: uid(), type: 'circle', cx: c.cx + dx, cy: c.cy + dy, r: c.r, stroke: color, strokeWidth: 1.5, fill: null, dash: 'solid', layer: layer }); }
+  for (let i = 0; i < polys.length; i++) { const pts = []; const p = polys[i].points; for (let j = 0; j < p.length; j++) pts.push({ x: p[j].x + dx, y: p[j].y + dy }); out.push({ id: uid(), type: 'polyline', points: pts, closed: !!polys[i].closed, stroke: color, strokeWidth: 1.5, fill: null, dash: 'solid', layer: layer }); }
+  for (let i = 0; i < dims.length; i++) { const d = dims[i]; out.push({ id: uid(), type: 'dim', x1: d.x1 + dx, y1: d.y1 + dy, x2: d.x2 + dx, y2: d.y2 + dy, stroke: '#fbbf24', strokeWidth: 1.5, fill: null, dash: 'solid', layer: layer }); }
+
+  const created = [];
+  let added = 0;
+  for (let i = 0; i < out.length; i++) { if (addShapeWithLimit(out[i], added === 0)) { created.push(out[i].id); added++; } else break; }
+  if (added) {
+    const sel = ensureSelectionSet();
+    sel.clear();
+    for (let i = 0; i < created.length; i++) sel.add(created[i]);
+    pushHistory();
+  }
+  closeNetDlg(); draw();
+}
+safeSetHandlerById('btnNet', 'onclick', e => openNetDlg(safeEventCurrentTarget(e, safeGetElementById('btnNet'))));
+safeSetHandlerById('netClose', 'onclick', closeNetDlg);
+safeSetHandlerById('netOk', 'onclick', runNet);
+safeSetHandler(safeGetElementById('netType'), 'onchange', netSyncFields);
+safeAddEventListener(netDlg, 'click', e => { if (safeEventTarget(e) === netDlg) closeNetDlg(); });
+safeAddEventListener(netDlg, 'keydown', e => {
+  stopKeyPropagation(e);
+  trapFocus(netDlg, e);
+  if (keyEventKey(e) === 'Escape') { preventKeyDefault(e); closeNetDlg(); }
 });
 
 const selActions = safeGetElementById('selActions');
