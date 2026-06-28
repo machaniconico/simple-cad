@@ -96,7 +96,7 @@
 - 純粋な HTML + CSS + Canvas 2D + Pointer Events。ランタイム依存ゼロ。
 - 高DPI(`devicePixelRatio`)対応、`touch-action:none`。
 - 回転は各図形の `rot`(ラジアン)で保持し、ヒットテスト/ハンドルは中心まわり逆回転でローカル座標化。
-- PWA: `manifest.webmanifest` + `sw.js`（cache-first）でオフライン動作・ホーム画面追加。Manifestに安定ID/言語/SVG+PNGアイコンを明示し、runtime cacheは既知のアプリ静的資産だけに限定します。クエリ付き動的URL、`cache:no-store/no-cache/reload`リクエスト、`Authorization`/`Cookie`付きリクエスト、`Cache-Control:no-store/no-cache/private/max-age=0`レスポンス、`Pragma:no-cache`、期限切れ`Expires`、`Vary:*`/`Vary:Authorization`/`Vary:Cookie`、`Range`/`Content-Range`付きの部分レスポンスは保存しません。Service Worker更新検知時は保留中の自動保存を同期保存し、再読み込みで最新版を反映できる更新通知バンドを表示します。ロード後の登録再実行/多重呼び出しも安全に処理し、アプリシェルのキャッシュ欠落時も制御されたオフライン案内を返します。
+- PWA: `manifest.webmanifest` + `sw.js`（cache-first）でオフライン動作・ホーム画面追加。Manifestに安定ID/言語/SVG+PNGアイコンを明示し、ブラウザ互換用にICO faviconも同梱します。runtime cacheは既知のアプリ静的資産だけに限定します。クエリ付き動的URL、`cache:no-store/no-cache/reload`リクエスト、`Authorization`/`Cookie`付きリクエスト、`Cache-Control:no-store/no-cache/private/max-age=0`レスポンス、`Pragma:no-cache`、期限切れ`Expires`、`Vary:*`/`Vary:Authorization`/`Vary:Cookie`、`Range`/`Content-Range`付きの部分レスポンスは保存しません。Service Worker更新検知時は保留中の自動保存を同期保存し、再読み込みで最新版を反映できる更新通知バンドを表示します。ロード後の登録再実行/多重呼び出しも安全に処理し、アプリシェルのキャッシュ欠落時も制御されたオフライン案内を返します。
 - アクセシビリティ: 主要ツールバー/キャンバス/プロパティ/通知/ステータスに `role` / `aria-label` / `aria-live` を付与し、色スウォッチ/レイヤー操作/モーダル/書き出しメニューのラベル、可視フォーカス、フォーカス復帰も検証します。
 - PDF: SVG化→高解像度ラスタライズ→`FlateDecode`可逆埋め込み、ページを実寸mm（pt換算）に。日本語も崩れない。
 - 外部JSON/localStorage/画像は取り込み時にサニタイズ（型allowlist・色検証・数値範囲クランプ・画像配置はラスタ`data:image/…;base64`のみ・未使用画像キャッシュ破棄・`__proto__`除去）。
@@ -106,15 +106,16 @@
 ヘッドレスブラウザ（Playwright/Chromium）による自動テストを同梱。
 
 ```bash
-npm install && npx playwright install chromium   # 初回のみ
+npm install                                  # 初回のみ
 npm run ci                                   # 全検証 + リポジトリ衛生チェック
-npm test                                     # 機能/PWA/PDF検証
-node test/verify.mjs                         # 機能テスト 706項目
-node test/pwacheck.mjs  # PWA(SW/オフライン) 30項目
+npm test                                     # 機能/PWA/PDF/SW検証
+node test/verify.mjs                         # 機能テスト 712項目
+node test/pwacheck.mjs  # PWA(SW/オフライン) 34項目
 node test/pdfcheck.mjs  # 生成PDFのxrefオフセット構造検証
 node test/swunit.mjs   # Service Worker単体検証 44項目
 ```
 
 - 作図・複数選択・編集・整列・変形・重ね順・配列・グループ・レイヤー・文字(整列)・画像・楕円・円弧・多角形・角度寸法・連続寸法・線種・計測(小数桁)・交点スナップ・DXF/SVG/PNG/PDF書き出し・DXF/SVG取り込み・PWA・入力サニタイズまで全項目パス。
-- GitHub ActionsのCIで `npm run ci` をpush / pull requestごとに実行し、Playwright Chromium導入、全検証、末尾空白/最終改行/マージ衝突マーカー/JSON構文/PWA公開資産参照/start_url・scope整合性のリポジトリ衛生チェックまで自動確認します。`.gitattributes` でテキスト改行とPNG/PDF等のバイナリ属性も固定しています。
+- `npm test` / `npm run ci` は事前処理でPlaywright Chromiumを導入するため、初回も同じコマンドで検証できます。
+- GitHub ActionsのCIで `npm run ci` をpush / pull requestごとに実行し、Playwright Chromium導入、全検証、CI workflow構造、末尾空白/最終改行/マージ衝突マーカー/JSON構文/PWA公開資産参照/start_url・scope整合性/HTML headのPWA・CSP契約/SVG・ICOアイコン構造/ローカルショートカット混入のリポジトリ衛生チェックまで自動確認します。`.gitattributes` でテキスト改行とPNG/PDF等のバイナリ属性も固定しています。
 - コードレビュー／セキュリティレビューを複数回実施し、指摘事項は反映済み。

@@ -2,7 +2,11 @@ node_modules/
 .omc/
 *.log
 .DS_Store
+Thumbs.db
+desktop.ini
 drawing.pdf
 drawing.svg
 drawing.png
 drawing.json
+*.url
+*.lnk
