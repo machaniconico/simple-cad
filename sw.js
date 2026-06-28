@@ -1,7 +1,7 @@
 // SimpleCAD Service Worker — オフライン対応(cache-first)
 const CACHE_PREFIX = 'simplecad-v';
-const CACHE = 'simplecad-v251';
-const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+const CACHE = 'simplecad-v198282558013852';
+const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg', './simplecad.ico', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 const APP_SHELL = './index.html';
 const OFFLINE_FALLBACK_HTML = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SimpleCAD オフライン</title><body><h1>SimpleCAD オフライン</h1><p>アプリ本体のキャッシュが見つかりません。接続後に再読み込みしてください。</p></body></html>';
 
